@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 210 25% 98%;
+  --foreground: 215 28% 17%;
+  --surface: 0 0% 100%;
+  --surface-elevated: 210 20% 99%;
+  --muted: 210 24% 95%;
+  --muted-foreground: 215 13% 46%;
+  --border: 214 24% 89%;
+  --primary: 153 57% 24%;
+  --primary-foreground: 0 0% 100%;
+  --success: 151 55% 32%;
+  --warning: 35 92% 42%;
+  --danger: 0 68% 45%;
+  --info: 207 75% 42%;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+html {
+  min-width: 320px;
+  background: hsl(var(--background));
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background:
+    radial-gradient(circle at 90% 0%, rgba(43, 122, 83, 0.08), transparent 24rem),
+    hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-feature-settings: "rlig" 1, "calt" 1;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: rgba(43, 122, 83, 0.18);
+}
+
+:focus-visible {
+  outline: 3px solid rgba(43, 122, 83, 0.35);
+  outline-offset: 2px;
+}
+
+@layer components {
+  .surface {
+    @apply rounded-2xl border bg-surface shadow-soft;
+  }
+
+  .eyebrow {
+    @apply text-xs font-semibold uppercase tracking-[0.16em] text-primary;
+  }
+}

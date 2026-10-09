@@ -1,0 +1,13 @@
+{
+  "name": "@renewi-access/e2e",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Compose-hosted final-acceptance browser tests for the Renewi access demo.",
+  "scripts": {
+    "test": "playwright test",
+    "test:report": "playwright show-report ../../artifacts/batch8/playwright/report"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.49.1"
+  }
+}

@@ -1,0 +1,16 @@
+# Dependencies
+/node_modules
+
+# Next.js output
+/.next
+/out
+
+# Local environment overrides
+.env*.local
+
+# Logs and TypeScript cache
+*.log
+*.tsbuildinfo
+
+# Temporary validation artifacts
+/step02-*.png

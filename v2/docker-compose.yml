@@ -1,0 +1,198 @@
+name: renewi-access
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-renewi_access}
+      POSTGRES_USER: ${POSTGRES_USER:-renewi}
+      # Trust authentication is restricted to this local-only demo stack.
+      POSTGRES_HOST_AUTH_METHOD: trust
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
+  redis:
+    image: redis:7.4-alpine
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --save
+      - "60"
+      - "1"
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test:
+        - CMD
+        - redis-cli
+        - ping
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+      args:
+        API_INTERNAL_BASE_URL: http://api:8000
+        NEXT_PUBLIC_API_BASE_URL: ""
+    environment:
+      API_INTERNAL_BASE_URL: http://api:8000
+      HOSTNAME: 0.0.0.0
+      PORT: "3000"
+      NEXT_PUBLIC_API_BASE_URL: ""
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://localhost:3000').then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1))
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  # The application profile starts the complete credential-free local stack with:
+  # docker compose --profile application up --build
+  api:
+    profiles:
+      - application
+      - e2e
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    # Keep provider credentials and provider selection server-only. These
+    # values must not be supplied to the web container or committed to Git.
+    env_file:
+      - ./services/api/.env
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://renewi@postgres:5432/renewi_access}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      DEMO_MODE: ${DEMO_MODE:-true}
+      DEMO_TIMEZONE: ${DEMO_TIMEZONE:-Europe/Amsterdam}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-renewi_session}
+      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-28800}
+      STORAGE_PROVIDER: ${STORAGE_PROVIDER:-local}
+      STORAGE_LOCAL_PATH: ${STORAGE_LOCAL_PATH:-/var/lib/renewi/evidence}
+      IDENTITY_VERIFIER_PROVIDER: ${IDENTITY_VERIFIER_PROVIDER:-mock}
+      NOTIFICATION_PROVIDER: ${NOTIFICATION_PROVIDER:-mock}
+      AUTH_PROVIDER: ${AUTH_PROVIDER:-demo}
+      BACKEND_PORT: "8000"
+      APP_SECRET_KEY: ${APP_SECRET_KEY:-}
+      DEMO_SEED_PASSWORD: ${DEMO_SEED_PASSWORD:-renewi-demo-access}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
+      S3_REGION: ${S3_REGION:-}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      IDENTITY_PROVIDER_API_URL: ${IDENTITY_PROVIDER_API_URL:-}
+      IDENTITY_PROVIDER_API_KEY: ${IDENTITY_PROVIDER_API_KEY:-}
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - private_storage:/var/lib/renewi/evidence
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  # This runner is deliberately isolated from the application API: it exists
+  # only in the disposable E2E profile, has no host port, and accepts requests
+  # solely from callers holding the profile-specific capability token.
+  baseline:
+    profiles:
+      - e2e
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    command:
+      - uvicorn
+      - app.e2e_baseline:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8001"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://renewi@postgres:5432/renewi_access}
+      DEMO_SEED_PASSWORD: ${DEMO_SEED_PASSWORD:-renewi-demo-access}
+      E2E_BASELINE_TOKEN: ${E2E_BASELINE_TOKEN:-renewi-isolated-e2e-baseline}
+      STORAGE_LOCAL_PATH: ${STORAGE_LOCAL_PATH:-/var/lib/renewi/evidence}
+    volumes:
+      - private_storage:/var/lib/renewi/evidence
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://localhost:8001/health', timeout=3)
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  # The tests/e2e package is introduced by its owning implementation step.
+  e2e:
+    profiles:
+      - e2e
+    image: mcr.microsoft.com/playwright:v1.49.1-noble
+    working_dir: /workspace
+    command:
+      - sh
+      - -ec
+      - npm ci --prefix tests/e2e --ignore-scripts && npm --prefix tests/e2e test
+    environment:
+      WEB_BASE_URL: http://web:3000
+      API_BASE_URL: http://api:8000
+      E2E_BASELINE_TOKEN: ${E2E_BASELINE_TOKEN:-renewi-isolated-e2e-baseline}
+      E2E_BASELINE_URL: http://baseline:8001
+      E2E_DEMO_PASSWORD: ${DEMO_SEED_PASSWORD:-renewi-demo-access}
+    volumes:
+      - ./:/workspace
+    depends_on:
+      web:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+      baseline:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:
+  private_storage:

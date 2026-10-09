@@ -1,0 +1,61 @@
+﻿# Environment variables and secrets
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Credentials and certificates
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Next.js and build output
+.next/
+out/
+dist/
+build/
+.turbo/
+
+# Test output and coverage
+test-results/
+playwright-report/
+coverage/
+.pytest_cache/
+
+# IDE and operating system
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Generated validation builds
+.next/
+**/.next/
+.next-*/
+**/.next-*/
+node_modules/
+**/node_modules/
+test-results/
+playwright-report/
+
+# Local run without Docker (scripts/run-without-docker.sh)
+.local/

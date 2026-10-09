@@ -1,0 +1,38 @@
+# Run only with this override and a fresh disposable project:
+# docker compose -p renewi-gate-verification -f docker-compose.yml -f docker-compose.gate-verification.yml --profile e2e build --no-cache api baseline
+# docker compose -p renewi-gate-verification -f docker-compose.yml -f docker-compose.gate-verification.yml --profile e2e up -d --build postgres redis api baseline web
+# docker compose -p renewi-gate-verification -f docker-compose.yml -f docker-compose.gate-verification.yml --profile e2e run --rm e2e sh -ec 'npm ci --prefix tests/e2e --ignore-scripts && npm --prefix tests/e2e test -- test_full_lifecycle.spec.ts test_gate_denials.spec.ts'
+# Capture the E2E exit status and logs before cleanup. Do not run reset or
+# reseed against any other project. Afterward, remove only this disposable
+# project's containers and volumes with the same -p and -f arguments.
+name: renewi-gate-verification
+
+services:
+  postgres:
+    ports: !override
+      - "127.0.0.1:15432:5432"
+
+  redis:
+    ports: !override
+      - "127.0.0.1:16379:6379"
+
+  web:
+    ports: !override
+      - "127.0.0.1:13000:3000"
+
+  api:
+    environment:
+      OCR_PROVIDER: mock
+      WEB_ORIGIN: http://localhost:13000
+    ports: !override
+      - "127.0.0.1:18000:8000"
+
+  # Rebuild this from the same corrected source as the API. It has no host port.
+  baseline:
+    environment:
+      OCR_PROVIDER: mock
+
+  e2e:
+    environment:
+      WEB_BASE_URL: http://web:3000
+      API_BASE_URL: http://api:8000
