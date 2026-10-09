@@ -59,3 +59,6 @@ playwright-report/
 
 # Local run without Docker (scripts/run-without-docker.sh)
 .local/
+
+# Test run output (the browser and end-to-end tests write here)
+artifacts/

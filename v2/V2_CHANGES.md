@@ -74,6 +74,13 @@ One fix outside the requirement: `invitee-registration.tsx` removed the secret l
 and then read it again when React's development mode ran its startup code twice, so the page said the
 link was missing. It now remembers the link across the two runs. Production builds were not affected.
 
+A second fix outside the requirement: `apps/web/tsconfig.json` set `"target": "es5"`, which the newest
+TypeScript (7.x, bundled with current editors) rejects as removed, and it then also rejects the
+`import "./globals.css"` in `layout.tsx`. The target is now `es2017` (Next.js's recommendation) and
+`noUncheckedSideEffectImports` is `false`. The build, type-check and lint behave the same on TypeScript
+5.9 (the project's own version), and the type-check is clean on 7.x. Only type-checking is affected,
+since Next.js compiles the code itself.
+
 ## Decisions to confirm with Renewi
 
 - **The wording is sample text.** The rules and the confirmation sentence were written to show the
