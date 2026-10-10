@@ -1,4 +1,5 @@
 alembic==1.14.0
+boto3==1.43.110
 email-validator==2.2.0
 fastapi==0.115.6
 psycopg[binary]==3.2.3

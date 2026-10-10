@@ -456,8 +456,9 @@ async def post_recipient_registration(
             media_type=file.content_type or "application/octet-stream",
             content=content,
             storage=storage,
-            allow_real_identity_document=parser.__class__.__name__
-            == "AnthropicDocumentParser",
+            allow_real_identity_document=getattr(
+                parser, "reads_real_documents", False
+            ),
         )
         database.commit()
         return InviteeRegistrationStatus(
@@ -704,8 +705,9 @@ async def post_evidence_upload(
             media_type=file.content_type or "application/octet-stream",
             content=content,
             storage=storage,
-            allow_real_identity_document=parser.__class__.__name__
-            == "AnthropicDocumentParser",
+            allow_real_identity_document=getattr(
+                parser, "reads_real_documents", False
+            ),
         )
         # Do not invoke either the mock or external parser on an opaque format:
         # the mock can otherwise report fictional extracted fields as real work.
@@ -907,8 +909,9 @@ async def post_gate_evidence_upload(
             media_type=file.content_type or "application/octet-stream",
             content=content,
             storage=storage,
-            allow_real_identity_document=parser.__class__.__name__
-            == "AnthropicDocumentParser",
+            allow_real_identity_document=getattr(
+                parser, "reads_real_documents", False
+            ),
         )
         return _commit_evidence(database, evidence)
     except WorkflowError as error:

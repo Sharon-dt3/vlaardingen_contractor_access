@@ -74,12 +74,108 @@ One fix outside the requirement: `invitee-registration.tsx` removed the secret l
 and then read it again when React's development mode ran its startup code twice, so the page said the
 link was missing. It now remembers the link across the two runs. Production builds were not affected.
 
+A third change outside the requirement: the invitation form used to suggest a visit starting 24 hours
+after the demo time (ending at 32 hours), so a demo run hit `VISIT_OUTSIDE_WINDOW` at the gate until the
+clock caught up. It now suggests a start at the demo time rounded down to 15 minutes (so the visit has
+already begun) and an end 8 hours later (`defaultDateTime` in `invitation-workspace.tsx`). The API's own
+rules are unchanged: the end must be after the start and after the demo time.
+
 A second fix outside the requirement: `apps/web/tsconfig.json` set `"target": "es5"`, which the newest
 TypeScript (7.x, bundled with current editors) rejects as removed, and it then also rejects the
 `import "./globals.css"` in `layout.tsx`. The target is now `es2017` (Next.js's recommendation) and
 `noUncheckedSideEffectImports` is `false`. The build, type-check and lint behave the same on TypeScript
 5.9 (the project's own version), and the type-check is clean on 7.x. Only type-checking is affected,
 since Next.js compiles the code itself.
+
+## Walk-up registration through the entrance QR code
+
+For people the site did not know about in advance (the client's reply: "we often do not know who
+enters our site upfront"). It is a second way in, next to the invitation flow. Nothing in the
+invitation flow was removed or changed.
+
+1. A fixed QR code at the entrance opens `/arrive/vlaardingen` (the site's name as a short key).
+2. The person enters first name, last name, company, email and which of the six categories they are
+   (Renewi driver, temporary driver, external driver, maintenance contractor, permanent contractor or
+   visitor, the same as an invitation), reads the life-saving rules in their language, ticks the confirmation and
+   presses one button. No invitation, no ID document, no approval.
+3. The API stores the registration and the confirmation together, or nothing at all: the person
+   (reused if the same name and email arrived before), the exact wording confirmed, the rules
+   version, language, a hash of the rules shown, the time, and the arrival. Both are audited.
+4. The person sees "You are registered" with **a QR code, a Download QR button (saves a PNG) and a short
+   reference** to show at the kiosk.
+   The QR holds a random secret; only its hash is stored. It is valid for 12 hours.
+5. **At the kiosk** (the Gate kiosk page, above the original invitation kiosk, which is unchanged) the
+   operator scans that QR with the camera or an uploaded image, or types the reference. A scan fills the
+   reference into the box (the QR holds `renewi-walkup:<reference>:<secret>`) and the operator presses Check. The kiosk shows
+   name, company, type, when they registered and whether they confirmed the *current* life-saving
+   rules, and says "May enter" or "Do not admit" with the reason (rules outdated, person not allowed on
+   site, blacklisted). **Let in** records the entry, the operator and the time, and is audited. The
+   server re-checks everything when the button is pressed; the screen decides nothing. Letting the same
+   person in twice records nothing new.
+6. **Email check.** Before step 3, the person gets a 6-digit code by email and must enter it. Nothing is
+   stored as a person or a confirmation until the code is right: the form data waits in a short-lived
+   pending record (`walk_up_pending`). The code lasts 10 minutes, allows 5 wrong tries (the count is saved
+   even though the request fails), can be resent 3 times with a 30-second wait, and one email address
+   can have at most 5 codes an hour. Every arrival is checked, even for a returning person, so nobody can
+   register as someone else's email. The kiosk shows "Email: verified with a code" or "not verified".
+   It needs the mail server from `.env`; with `WALK_UP_EMAIL_CHECK=off` it is skipped, and with it on
+   but no mail server the form says so instead of silently skipping. Registrations made before this was
+   added show "not verified".
+7. **Exit and the shared dashboard.** Walk-up people count in the main dashboard, not in a separate
+   section. "Currently present", "Access grants", "Access denials", entries and exits include them (a let-in
+   is a grant and an entry, a refusal is a denial). They appear in the same on-site roster, with a
+   "Walk-up arrival" note, "No scheduled end" and a working **Record exit**, and in the recent gate
+   decisions. "Active visits" is unchanged, because a walk-up person has no visit. The server merges
+   them into the finished dashboard result (`merge_walk_ups_into_dashboard`) and into `/api/presence`
+   (`walk_up_presence_rows`). The invitation dashboard code and its tests are untouched, and the presence
+   list that the expiry features read still excludes walk-ups. Someone who left must register again to
+   come back in (they would have to pass the email check again). Entries older than 24 hours without an
+   exit are flagged on `/api/walk-up/on-site`.
+8. **Refusals are recorded.** When the kiosk says "Do not admit" (rules out of date, not allowed on site,
+   blacklisted, already left), a `walk_up.refused` audit event is written with the officer, the person,
+   the reasons and `source: system`. A repeated Check on the same person within a minute is not recorded
+   again. If the officer turns away someone the records would allow in, **Refuse entry** records the
+   reason (the person does not match their ID, nobody could confirm they are expected, or another reason
+   with a note) with `source: officer`. A code that matches no recent registration writes
+   `walk_up.lookup_failed` with the site and the kind of code, never the code itself. A refusal does not
+   lock the person out; it is a record. Counts and the last refusal show on the kiosk card and in the
+   arrivals list. Erasing a person erases their refusal events.
+9. **Every check at the kiosk leaves a record.** Pressing Check on someone who may enter writes
+   `walk_up.looked_up` (the officer, the person, whether the code was read as a QR or a typed reference,
+   and whether the person was already in). It never stores the code. A repeat by the same officer within
+   a minute is not written again; a second officer's check is. A refused person writes `walk_up.refused`
+   and a code that matches nobody writes `walk_up.lookup_failed`, so each check produces exactly one
+   kind of record. Erasing a person erases their lookup events too.
+10. Staff see it under **Walk-up arrivals** (with an Entry column showing who was let in and when) (the QR code to print, and who arrived in the last 24
+   hours with the wording confirmed), in the people list and on the person page, like any invited
+   person. Erasing a person erases their arrivals too.
+
+Code: `models/walk_up.py`, migration `20261010_0016`, `services/walk_up.py`, `routes/walk_up.py`,
+`schemas/walk_up.py`, `rate_limit.py`, migrations `20261010_0017` (pass and entry columns) and `0018` (email check, exit), `providers/walk_up_email.py`; web `app/arrive/[siteKey]`, `app/walk-up`, `app/gate`,
+`components/workflows/walk-up-registration.tsx`, `walk-up-qr-panel.tsx`, `walk-up-gate-check.tsx`,
+`walk-up-camera-scanner.tsx` and Tests: `tests/api/test_walk_up.py`. The kiosk was tried in the
+browser with an uploaded QR image and with a typed reference. The live camera scan was not tried (no
+camera here); it needs https or localhost.
+
+Choices made without asking, easy to change: email is required (a valid contact for emergencies);
+the arrival does not need approval; a walk-up registration never attaches to an invited or seeded
+person; the public form is limited to 30 registrations per 10 minutes per connection and has a
+hidden field that stops simple bots. **Still open:** whether the kiosk check is required for everyone (Harld answered "Yes" to "would
+the QR be scanned at kiosk on entering?"), whether admitted walk-ups should also count in v1's roster totals (they are listed beside it), which details Renewi wants collected, retention, and the real rules wording and
+legal acknowledgement (Esther's team). The QR link uses `WEB_ORIGIN`, which is `localhost` here, so a
+phone cannot open it until the app has an address the phone can reach.
+
+## Private storage in S3
+
+Uploaded identity documents can now be kept in S3-compatible object storage instead of the local
+folder: set `STORAGE_PROVIDER=s3` and `S3_ENDPOINT_URL`, `S3_REGION`, `S3_BUCKET`,
+`S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`. Files use the same content-addressed names as local
+storage, are encrypted at rest (AES256), and are never exposed by URL; only the API reads them. If
+any S3 setting is missing the app falls back to local storage and says so at startup. The bucket must
+be private and in the EU; creating it and the access keys is up to whoever hosts the app. Code:
+`S3Storage` in `providers/storage.py`, tests in `tests/api/test_s3_storage.py`. Tried against a fake
+S3 server (store, read, delete, encryption, no public access). Not yet tried end to end through the
+upload form, and not tried against real AWS or another provider.
 
 ## Decisions to confirm with Renewi
 
@@ -96,10 +192,8 @@ since Next.js compiles the code itself.
 - **A new version means everyone confirms again.** This is the safe reading of "read and understood".
 - **Retention.** How long confirmations are kept, and the legal basis for storing them, are not
   decided. Erasing a person removes their confirmations, like the rest of their data.
-- **Not built:** the walk-up flow described in the client's email (scan a QR code at the kiosk, register
-  with name and company, read the rules, acknowledge, with no prior invitation). v1 starts from an
-  invitation, and so does this change. That flow is the likely next step. Also not changed: the
-  on-site roster does not show the confirmation (everyone on it has already passed the gate check).
+- **Not changed:** the on-site roster does not show the confirmation (everyone on it has already
+  passed the gate check). The invitation flow still starts from an invitation and email.
 
 ## Verification
 

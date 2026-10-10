@@ -7,9 +7,11 @@ type GateQrScannerProps = {
   onScan: (payload: string) => void;
   onError: (message: string) => void;
   disabled?: boolean;
+  /** Distinguishes element ids when two scanners share one page. */
+  idSuffix?: string;
 };
 
-const scannerElementId = "gate-qr-image";
+const scannerElementBaseId = "gate-qr-image";
 const maxQrImageBytes = 5 * 1024 * 1024;
 
 // PUBLIC_INTERFACE
@@ -17,7 +19,14 @@ const maxQrImageBytes = 5 * 1024 * 1024;
  * Decodes an issued access QR from an uploaded image and returns its payload.
  * The decoded credential must still be validated by the Gate API.
  */
-export function GateQrScanner({ onScan, onError, disabled = false }: GateQrScannerProps) {
+export function GateQrScanner({
+  onScan,
+  onError,
+  disabled = false,
+  idSuffix = ""
+}: GateQrScannerProps) {
+  const scannerElementId = `${scannerElementBaseId}${idSuffix}`;
+  const fileInputId = `gate-qr-file${idSuffix}`;
   const [isScanning, setIsScanning] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   const scanningRef = useRef(false);
@@ -59,14 +68,14 @@ export function GateQrScanner({ onScan, onError, disabled = false }: GateQrScann
 
   return (
     <div className="space-y-2">
-      <label className="block text-xs font-semibold uppercase tracking-wide text-slate-600" htmlFor="gate-qr-file">
+      <label className="block text-xs font-semibold uppercase tracking-wide text-slate-600" htmlFor={fileInputId}>
         Issued QR image
       </label>
       <input
         accept="image/*"
         className="block w-full text-sm text-slate-700"
         disabled={disabled || isScanning}
-        id="gate-qr-file"
+        id={fileInputId}
         onChange={(event) => {
           const file = event.target.files?.[0];
           // Allow retrying the same image after a decoding error.

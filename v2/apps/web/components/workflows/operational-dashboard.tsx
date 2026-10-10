@@ -130,7 +130,7 @@ function RosterTable({
   canRecordExit: boolean;
   isRecordingExit: boolean;
   people: CurrentPresence[];
-  onRecordExit: (visitId: string) => void;
+  onRecordExit: (person: CurrentPresence) => void;
 }) {
   if (people.length === 0) {
     return (
@@ -157,16 +157,27 @@ function RosterTable({
         </thead>
         <tbody>
           {people.map((person) => (
-            <tr className="border-b border-slate-100 last:border-0" key={person.visit_id}>
+            <tr
+              className="border-b border-slate-100 last:border-0"
+              key={person.visit_id ?? person.walk_up_registration_id ?? person.person_id}
+            >
               <td className="px-4 py-4">
                 <span className="font-semibold text-slate-950">{person.person_name}</span>
-                <span className="mt-1 block text-xs font-normal text-slate-600">
-                  Verified ID expiry: {person.id_expiry_date ?? "Not available"}
-                </span>
+                {person.source === "walk_up" ? (
+                  <span className="mt-1 block text-xs font-normal text-slate-600">
+                    Walk-up arrival, registered at the entrance QR
+                  </span>
+                ) : (
+                  <span className="mt-1 block text-xs font-normal text-slate-600">
+                    Verified ID expiry: {person.id_expiry_date ?? "Not available"}
+                  </span>
+                )}
               </td>
               <td className="px-4 py-4 text-slate-700">{enumLabel(person.population)}</td>
               <td className="px-4 py-4 text-slate-700">{formatDateTime(person.entered_at)}</td>
-              <td className="px-4 py-4 text-slate-700">{formatDateTime(person.visit_ends_at)}</td>
+              <td className="px-4 py-4 text-slate-700">
+                {person.visit_ends_at ? formatDateTime(person.visit_ends_at) : "No scheduled end"}
+              </td>
               <td className="px-4 py-4">
                 <StatusBadge tone="success">{person.decision}</StatusBadge>
               </td>
@@ -175,7 +186,7 @@ function RosterTable({
                   <button
                     className={actionButton}
                     disabled={isRecordingExit}
-                    onClick={() => onRecordExit(person.visit_id)}
+                    onClick={() => onRecordExit(person)}
                     type="button"
                   >
                     <LogOut aria-hidden="true" className="h-4 w-4" />
@@ -349,27 +360,45 @@ export function OperationalDashboard() {
   }, [dashboardQuery.data?.sites, selectedSiteId]);
 
   const exitMutation = useMutation({
-    mutationFn: (visitId: string) =>
-      apiRequest<PresenceEvent>("/api/presence/exits", {
+    mutationFn: async (person: CurrentPresence) => {
+      if (person.source === "walk_up" && person.walk_up_registration_id && person.site_key) {
+        // A walk-up person has no visit: the exit is recorded on their arrival.
+        await apiRequest("/api/walk-up/gate/exit", {
+          method: "POST",
+          body: { site_key: person.site_key, registration_id: person.walk_up_registration_id }
+        });
+        return { walkUpRegistrationId: person.walk_up_registration_id, name: person.person_name } as const;
+      }
+      const event = await apiRequest<PresenceEvent>("/api/presence/exits", {
         method: "POST",
-        body: { visit_id: visitId }
-      }),
+        body: { visit_id: person.visit_id }
+      });
+      return { event } as const;
+    },
     onMutate: () => setExitConfirmation(null),
-    onSuccess: async (event) => {
-      // Only a committed exit may remove a row; retain every other visit in
-      // both the selected-site and all-sites roster caches.
-      if (event.event_type === "exit") {
+    onSuccess: async (result) => {
+      if ("walkUpRegistrationId" in result) {
         queryClient.setQueriesData<CurrentPresence[]>(
           { queryKey: ["presence"] },
-          (people) => people?.filter((person) => person.visit_id !== event.visit_id)
+          (people) => people?.filter((person) => person.walk_up_registration_id !== result.walkUpRegistrationId)
+        );
+      } else if (result.event.event_type === "exit") {
+        // Only a committed exit may remove a row; retain every other visit in
+        // both the selected-site and all-sites roster caches.
+        queryClient.setQueriesData<CurrentPresence[]>(
+          { queryKey: ["presence"] },
+          (people) => people?.filter((person) => person.visit_id !== result.event.visit_id)
         );
       }
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
-        queryClient.invalidateQueries({ queryKey: ["presence"] })
+        queryClient.invalidateQueries({ queryKey: ["presence"] }),
+        queryClient.invalidateQueries({ queryKey: ["walk-up"] })
       ]);
       setExitConfirmation(
-        `The API recorded the exit for visit ${event.visit_id.slice(0, 8)}. The roster has been refreshed.`
+        "walkUpRegistrationId" in result
+          ? `The exit for ${result.name} was recorded. The roster has been refreshed.`
+          : `The API recorded the exit for visit ${result.event.visit_id.slice(0, 8)}. The roster has been refreshed.`
       );
     }
   });
@@ -489,7 +518,7 @@ export function OperationalDashboard() {
               <RosterTable
                 canRecordExit={hasPermission("presence:write")}
                 isRecordingExit={exitMutation.isPending}
-                onRecordExit={(visitId) => exitMutation.mutate(visitId)}
+                onRecordExit={(person) => exitMutation.mutate(person)}
                 people={presenceQuery.data ?? []}
               />
             )
@@ -561,6 +590,7 @@ export function OperationalDashboard() {
                 <div>
                   <p className="font-semibold text-slate-950">
                     {decision.person_name ?? "Unresolved presentation"} · {decision.site_name ?? "Unknown site"}
+                    {decision.source === "walk_up" ? " · walk-up" : ""}
                   </p>
                   <p className="mt-1 text-sm text-muted-foreground">
                     {formatDateTime(decision.occurred_at)}

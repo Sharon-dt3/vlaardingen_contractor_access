@@ -7,6 +7,17 @@
 #   scripts/run-without-docker.sh reset    restore the seeded demo data
 #   scripts/run-without-docker.sh logs     follow the API and web logs
 #
+# Optional: to send real invitation emails, put SMTP_USERNAME, SMTP_PASSWORD (a Gmail app password)
+# and SMTP_FROM_ADDRESS in ./.env (git-ignored). WEB_ORIGIN there sets the address used in the
+# email links. To read real Dutch ID cards, set OCR_PROVIDER=anthropic and ANTHROPIC_API_KEY (the
+# document is sent to Anthropic), or OCR_PROVIDER=bedrock with BEDROCK_ACCESS_KEY_ID,
+# BEDROCK_SECRET_ACCESS_KEY, BEDROCK_REGION and BEDROCK_MODEL_ID (Claude on AWS). For S3-compatible evidence storage set STORAGE_PROVIDER=s3 and S3_ENDPOINT_URL,
+# S3_REGION, S3_BUCKET, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY. Without them, invitations stay local-only ("Local only - no email sent").
+#
+# For a public demo through a tunnel such as ngrok, add WEB_MODE=production to ./.env (or run
+# WEB_MODE=production scripts/run-without-docker.sh start): it serves the compressed production
+# build, which loads in seconds instead of minutes over a slow tunnel. Rebuilds happen when switching.
+#
 # Needs: Python 3.12, Node.js 20 or later, PostgreSQL 17 (on a Mac: brew install python@3.12 postgresql@17).
 # Everything it creates lives in ./.local, including its own database on its own port, so it
 # never touches any other PostgreSQL on this machine. Delete ./.local to start from nothing.
@@ -54,6 +65,18 @@ api_env() {
   export STORAGE_PROVIDER=local STORAGE_LOCAL_PATH="$LOCAL/evidence"
   export OCR_PROVIDER=mock IDENTITY_VERIFIER_PROVIDER=mock NOTIFICATION_PROVIDER=mock AUTH_PROVIDER=demo
   export BACKEND_PORT="$API_PORT"
+  if [ -f "$ROOT/.env" ]; then
+    # Read plain KEY=value lines (values may contain spaces); do not run the file as shell code.
+    local line key value
+    while IFS= read -r line || [ -n "$line" ]; do
+      case "$line" in ""|\#*) continue ;; esac
+      key="${line%%=*}"; value="${line#*=}"
+      value="${value%\"}"; value="${value#\"}"
+      case "$key" in SMTP_*|S3_*|STORAGE_PROVIDER|WEB_MODE|WALK_UP_EMAIL_CHECK|OCR_PROVIDER|ANTHROPIC_*|BEDROCK_*|WEB_ORIGIN) export "$key=$value" ;; esac
+    done <"$ROOT/.env"
+    # Google shows app passwords in groups separated by spaces; the real password has none.
+    SMTP_PASSWORD="${SMTP_PASSWORD:-}"; export SMTP_PASSWORD="${SMTP_PASSWORD// /}"
+  fi
   # The demo-only password lives in .env.example; it is not a real credential.
   DEMO_SEED_PASSWORD="$(grep '^DEMO_SEED_PASSWORD=' "$ROOT/.env.example" | cut -d= -f2-)"
   export DEMO_SEED_PASSWORD
@@ -124,7 +147,22 @@ cmd_start() {
   if ! running web; then
     export API_INTERNAL_BASE_URL="http://127.0.0.1:$API_PORT" NEXT_PUBLIC_API_BASE_URL="" \
       PORT="$WEB_PORT" HOSTNAME=127.0.0.1 NEXT_TELEMETRY_DISABLED=1
-    start_detached web "$ROOT/apps/web" npm run dev
+    # The dev server sends large uncompressed scripts, which is far too slow through a public
+    # tunnel such as ngrok. WEB_MODE=production serves the compressed production build instead.
+    WEB_MODE="${WEB_MODE:-development}"
+    if [ "$(cat "$LOCAL/web-mode" 2>/dev/null || true)" != "$WEB_MODE" ]; then
+      rm -rf "$ROOT/apps/web/.next"
+      echo "$WEB_MODE" >"$LOCAL/web-mode"
+    fi
+    if [ "$WEB_MODE" = "production" ]; then
+      if [ ! -f "$ROOT/apps/web/.next/BUILD_ID" ]; then
+        echo "Building the web app for production (about a minute)..."
+        (cd "$ROOT/apps/web" && npm run build >"$LOCAL/web-build.log" 2>&1) || fail "the web build failed. See $LOCAL/web-build.log"
+      fi
+      start_detached web "$ROOT/apps/web" node ./node_modules/next/dist/bin/next start -p "$WEB_PORT" -H 127.0.0.1
+    else
+      start_detached web "$ROOT/apps/web" npm run dev
+    fi
   fi
 
   printf "Waiting for the app"

@@ -20,4 +20,4 @@ It needs Python 3.12, Node.js 20 or later and PostgreSQL 17. If you prefer Docke
 ## Status
 
 - The life-saving rules wording is **sample text**. Renewi's own rules and approved legal wording must replace it before any real use.
-- The walk-up flow (scan a QR code, register with name and company, read and acknowledge the rules, with no prior invitation) is not built yet.
+- The walk-up flow is built next to the invitation flow: scan the entrance QR code, register with name, company and email, read and confirm the rules, no invitation needed. See [v2/V2_CHANGES.md](v2/V2_CHANGES.md). A phone can only open the QR link once the app is reachable at a real address.

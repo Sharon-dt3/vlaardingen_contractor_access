@@ -2,6 +2,7 @@
 
 import { PermissionBoundary } from "@/components/auth/permission-boundary";
 import { GateOperatorKiosk } from "@/components/workflows/gate-operator-kiosk";
+import { WalkUpGateCheck } from "@/components/workflows/walk-up-gate-check";
 
 // PUBLIC_INTERFACE
 /**
@@ -11,7 +12,10 @@ import { GateOperatorKiosk } from "@/components/workflows/gate-operator-kiosk";
 export default function GatePage() {
   return (
     <PermissionBoundary permission="gate:evaluate">
-      <GateOperatorKiosk />
+      <div className="space-y-8">
+        <WalkUpGateCheck />
+        <GateOperatorKiosk />
+      </div>
     </PermissionBoundary>
   );
 }

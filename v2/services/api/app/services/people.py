@@ -22,6 +22,7 @@ from app.models import (
     IdentityVerification,
     Invitation,
     LifeSavingRulesAcknowledgement,
+    WalkUpRegistration,
     Person,
     PresenceEvent,
     PrivateErasureJob,
@@ -212,6 +213,9 @@ def delete_person_data(
     acknowledgement_ids = select(LifeSavingRulesAcknowledgement.id).where(
         LifeSavingRulesAcknowledgement.person_id == person_id
     )
+    walk_up_ids = select(WalkUpRegistration.id).where(
+        WalkUpRegistration.person_id == person_id
+    )
 
     # Audit rows store identifiers as text and may also contain a person UUID
     # inside structured details. Remove those rows before deleting their
@@ -232,6 +236,7 @@ def delete_person_data(
         ("identity_verification", identity_ids),
         ("gate_identity_scan", scan_ids),
         ("life_saving_rules_acknowledgement", acknowledgement_ids),
+        ("walk_up_registration", walk_up_ids),
     )
     audit_predicates = [
         (AuditEvent.entity_type == kind)
@@ -284,6 +289,9 @@ def delete_person_data(
     database.execute(delete(Approval).where(Approval.visit_id.in_(visit_ids)))
     database.execute(delete(TrainingResult).where(TrainingResult.person_id == person_id))
     database.execute(delete(BlacklistEntry).where(BlacklistEntry.person_id == person_id))
+    database.execute(
+        delete(WalkUpRegistration).where(WalkUpRegistration.person_id == person_id)
+    )
     database.execute(
         delete(LifeSavingRulesAcknowledgement).where(
             LifeSavingRulesAcknowledgement.person_id == person_id

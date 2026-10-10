@@ -48,9 +48,12 @@ class PresenceEventResponse(BaseModel):
 class CurrentPresenceResponse(BaseModel):
     """A sanitized projection of one person currently present at a site."""
 
-    gate_event_id: uuid.UUID = Field(
-        ...,
-        description="Backend-authoritative grant that established entry.",
+    gate_event_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "Backend-authoritative grant that established entry. Null for a walk-up "
+            "person, who has no gate event."
+        ),
     )
     presence_event_id: uuid.UUID | None = Field(
         default=None,
@@ -67,20 +70,32 @@ class CurrentPresenceResponse(BaseModel):
             "proposals are never displayed as verified dates."
         ),
     )
-    visit_id: uuid.UUID = Field(..., description="Active visit identifier.")
+    visit_id: uuid.UUID | None = Field(
+        default=None, description="Active visit identifier. Null for a walk-up person."
+    )
     site_id: uuid.UUID = Field(..., description="Site where the person is present.")
     site_name: str = Field(..., description="Safe display name for the site.")
     entered_at: datetime = Field(
         ...,
         description="UTC instant of the active authorized entry.",
     )
-    visit_ends_at: datetime = Field(
-        ...,
-        description="UTC visit-window end after which presence expires.",
+    visit_ends_at: datetime | None = Field(
+        default=None,
+        description="UTC visit-window end after which presence expires. Null for a walk-up person.",
     )
     decision: str = Field(
         ...,
         description="Authoritative grant decision associated with the entry.",
+    )
+    source: str = Field(
+        default="invitation",
+        description="Where the person came from: an invitation, or a walk-up registration.",
+    )
+    walk_up_registration_id: uuid.UUID | None = Field(
+        default=None, description="The walk-up registration, when source is walk_up."
+    )
+    site_key: str | None = Field(
+        default=None, description="Short site key used to record a walk-up exit."
     )
 
 
@@ -125,6 +140,7 @@ class DashboardDecisionResponse(BaseModel):
     person_name: str | None
     decision: GateDecision
     reason_codes: list[str]
+    source: str = "invitation"
 
 
 # PUBLIC_INTERFACE

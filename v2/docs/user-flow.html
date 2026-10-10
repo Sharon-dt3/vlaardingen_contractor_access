@@ -1,0 +1,289 @@
+<meta charset="utf-8">
+<title>Site Access User Flow</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a title block, a legend, one wide swim diagram that scrolls sideways on small screens, then a short glossary. */
+:root{
+  --bg:#F6F7F9; --surface:#FFFFFF; --fg:#1B1F27; --muted:#556070; --line:#CBD0DA; --line-strong:#8A93A3; --arrow:#6B7482; --on-line:#FFFFFF;
+  --staff-bg:#E2F1EC; --staff-line:#2F7F6B; --staff-fg:#14463B; --staff-fg2:#2D6757;
+  --person-bg:#ECE9FA; --person-line:#6A5BC2; --person-fg:#2D2570; --person-fg2:#4F44A0;
+  --system-bg:#ECEEF2; --system-line:#6B7482; --system-fg:#232831; --system-fg2:#485060;
+  --officer-bg:#FBEFD9; --officer-line:#B7791F; --officer-fg:#573906; --officer-fg2:#7B5116;
+  --deny-bg:#FBE4E2; --deny-line:#C0392B; --deny-fg:#6B1A14; --deny-fg2:#8C2B22;
+  --new-bg:#FFE3D8; --new-line:#D85A30; --new-fg:#8A2E10;
+  --font:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif; --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#14161A; --surface:#1C1F25; --fg:#E8EAEE; --muted:#A4ACB9; --line:#3A404B; --line-strong:#6C7587; --arrow:#9AA3B3; --on-line:#14161A;
+  --staff-bg:#12302A; --staff-line:#4FB59C; --staff-fg:#CBEFE5; --staff-fg2:#9ACFC1;
+  --person-bg:#231F45; --person-line:#8F82E0; --person-fg:#E0DCFB; --person-fg2:#B5ADEB;
+  --system-bg:#232830; --system-line:#8A93A3; --system-fg:#E6E9EE; --system-fg2:#B1B8C4;
+  --officer-bg:#3A2B10; --officer-line:#D9A441; --officer-fg:#FBE6BC; --officer-fg2:#E3C583;
+  --deny-bg:#3C1715; --deny-line:#E5645A; --deny-fg:#FFD1CC; --deny-fg2:#F0A29A;
+  --new-bg:#4A2214; --new-line:#E8794E; --new-fg:#FFC9B5; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#14161A; --surface:#1C1F25; --fg:#E8EAEE; --muted:#A4ACB9; --line:#3A404B; --line-strong:#6C7587; --arrow:#9AA3B3; --on-line:#14161A;
+  --staff-bg:#12302A; --staff-line:#4FB59C; --staff-fg:#CBEFE5; --staff-fg2:#9ACFC1;
+  --person-bg:#231F45; --person-line:#8F82E0; --person-fg:#E0DCFB; --person-fg2:#B5ADEB;
+  --system-bg:#232830; --system-line:#8A93A3; --system-fg:#E6E9EE; --system-fg2:#B1B8C4;
+  --officer-bg:#3A2B10; --officer-line:#D9A441; --officer-fg:#FBE6BC; --officer-fg2:#E3C583;
+  --deny-bg:#3C1715; --deny-line:#E5645A; --deny-fg:#FFD1CC; --deny-fg2:#F0A29A;
+  --new-bg:#4A2214; --new-line:#E8794E; --new-fg:#FFC9B5; color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--font);line-height:1.55}
+.wrap{max-width:1480px;margin:0 auto;padding-inline:20px;padding-block:32px 56px}
+h1{font-size:clamp(26px,3.4vw,38px);line-height:1.15;margin:0 0 12px;font-weight:600;letter-spacing:-.01em;text-wrap:balance}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 10px}
+.lead{max-width:72ch;margin:0 0 22px;color:var(--fg);font-size:17px}
+.legend{display:flex;flex-wrap:wrap;gap:10px 14px;margin:0 0 20px;padding:0;list-style:none}
+.legend li{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--muted)}
+.sw{width:16px;height:16px;border-radius:4px;border:1.5px solid}
+.sw.staff{background:var(--staff-bg);border-color:var(--staff-line)}.sw.person{background:var(--person-bg);border-color:var(--person-line)}
+.sw.system{background:var(--system-bg);border-color:var(--system-line)}.sw.officer{background:var(--officer-bg);border-color:var(--officer-line)}
+.sw.new{background:var(--new-bg);border-color:var(--new-line);border-radius:10px;width:26px}
+.scroll{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:12px}
+svg.flow{display:block;width:100%;min-width:1040px;height:auto;font-family:var(--font)}
+.card{stroke-width:1.5}.card.dashed{stroke-dasharray:6 5}
+.card.staff{fill:var(--staff-bg);stroke:var(--staff-line)}.card.person{fill:var(--person-bg);stroke:var(--person-line)}
+.card.system{fill:var(--system-bg);stroke:var(--system-line)}.card.officer{fill:var(--officer-bg);stroke:var(--officer-line)}
+.card.decision{fill:var(--system-bg);stroke:var(--system-line)}.card.deny{fill:var(--deny-bg);stroke:var(--deny-line)}
+.card.open{fill:var(--surface);stroke:var(--new-line)}.card.neutral{fill:var(--surface);stroke:var(--line-strong)}
+.lane{fill:var(--bg);stroke:var(--line-strong);stroke-width:1.5}
+.lanet{font-size:17px;font-weight:600;fill:var(--fg)}.lanes{font-size:14px;fill:var(--muted)}
+.actor{font-size:11.5px;font-weight:500;letter-spacing:.09em}
+.ttl{font-size:17px;font-weight:600}.dsc{font-size:14px}
+.staff.ttl{fill:var(--staff-fg)}.person.ttl{fill:var(--person-fg)}.system.ttl,.decision.ttl{fill:var(--system-fg)}.officer.ttl{fill:var(--officer-fg)}.deny.ttl{fill:var(--deny-fg)}.open.ttl{fill:var(--new-line)}.neutral.ttl{fill:var(--fg)}
+.staff.dsc,.staff.actor{fill:var(--staff-fg2)}.person.dsc,.person.actor{fill:var(--person-fg2)}.system.dsc,.system.actor,.decision.dsc,.decision.actor{fill:var(--system-fg2)}
+.officer.dsc,.officer.actor{fill:var(--officer-fg2)}.deny.dsc,.deny.actor{fill:var(--deny-fg2)}.open.dsc{fill:var(--fg)}.open.actor{fill:var(--new-line)}.neutral.dsc{fill:var(--muted)}
+.num.staff{fill:var(--staff-line)}.num.person{fill:var(--person-line)}.num.system{fill:var(--system-line)}.num.officer{fill:var(--officer-line)}
+.numtx{font-size:14px;font-weight:600;fill:var(--on-line)}
+.pill{fill:var(--new-bg);stroke:var(--new-line);stroke-width:1}.pilltx{font-size:11.5px;font-weight:600;fill:var(--new-fg)}
+.arr{stroke:var(--arrow);stroke-width:1.6}.lbl{font-size:13px;font-weight:500;fill:var(--muted)}
+.gloss{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:14px;margin-top:24px}
+.gloss div{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.gloss h2{font-size:15px;margin:0 0 4px;font-weight:600}.gloss p{margin:0;font-size:14px;color:var(--muted)}
+.note{margin-top:18px;padding:12px 16px;border:1px dashed var(--new-line);border-radius:10px;font-size:14px;color:var(--fg);max-width:90ch}
+.hint{font-size:13px;color:var(--muted);margin:8px 2px 0}
+</style>
+<div class="wrap">
+<p class="eyebrow">Renewi · Vlaardingen pilot</p>
+<h1>How a person gets onto the Vlaardingen site</h1>
+<p class="lead">Everyone who enters must have confirmed the life-saving rules, and the gate officer must be able to see that before letting them in. People Renewi expects are invited and checked in advance (Path A). People nobody expected register themselves at the entrance (Path B). Both end at the same gate kiosk.</p>
+<ul class="legend" aria-label="Colour key">
+<li><span class="sw staff"></span>Renewi staff</li><li><span class="sw person"></span>The person</li><li><span class="sw system"></span>The system</li><li><span class="sw officer"></span>Gate officer</li><li><span class="sw new"></span>New in v2</li>
+</ul>
+<div class="scroll" tabindex="0" aria-label="User flow diagram, scrolls sideways on small screens">
+<svg class="flow" viewBox="0 0 1400 2004" role="img" aria-labelledby="ft fd">
+<title id="ft">How a person gets onto the Vlaardingen site</title>
+<desc id="fd">Two paths lead to one gate kiosk. Path A is a planned arrival: invite, register, confirm the life-saving rules, review, approve, access QR. Path B is an unexpected arrival: scan the entrance sign, register, confirm the rules, check the email, entry QR. The officer reads the code, the server checks the records, and the officer lets the person in or refuses. The person is listed as on site until their exit is recorded.</desc>
+<defs><marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M2 1L8 5L2 9" fill="none" style="stroke:var(--arrow)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+<rect class="card neutral" x="520" y="24" width="360" height="64" rx="10"/>
+<text class="ttl neutral" x="700" y="48" text-anchor="middle" dominant-baseline="central">A person needs to enter the site</text>
+<text class="dsc neutral" x="700" y="70" text-anchor="middle" dominant-baseline="central">Contractor, driver or visitor</text>
+<path class="arr" d="M700 88 L700 112 L350 112 L350 134" fill="none" marker-end="url(#ah)"/>
+<path class="arr" d="M700 88 L700 112 L1050 112 L1050 134" fill="none" marker-end="url(#ah)"/>
+<rect class="lane" x="40" y="140" width="620" height="56" rx="10"/>
+<text class="lanet" x="60" y="162" dominant-baseline="central">Path A · Planned arrival</text>
+<text class="lanes" x="60" y="182" dominant-baseline="central">Someone at Renewi knows they are coming.</text>
+<rect class="lane" x="740" y="140" width="620" height="56" rx="10"/>
+<text class="lanet" x="760" y="162" dominant-baseline="central">Path B · Unexpected arrival</text>
+<text class="lanes" x="760" y="182" dominant-baseline="central">Nobody knew in advance. They register themselves.</text>
+<rect class="pill" x="1264" y="150" width="80" height="20" rx="10"/>
+<text class="pilltx" x="1304" y="160" text-anchor="middle" dominant-baseline="central">New in v2</text>
+<rect class="card staff" x="40" y="224" width="620" height="132" rx="10"/>
+<text class="actor staff" x="100" y="246">RENEWI STAFF</text>
+<circle class="num staff" cx="70" cy="264" r="14"/>
+<text class="numtx" x="70" y="264" text-anchor="middle" dominant-baseline="central">1</text>
+<text class="ttl staff" x="100" y="270">Invite</text>
+<text class="dsc staff" x="100" y="294">Staff enter the person&#x27;s email, company, purpose and visit window. An</text>
+<text class="dsc staff" x="100" y="314">email with an accept link is sent to the person.</text>
+<rect class="card person" x="40" y="378" width="620" height="132" rx="10"/>
+<text class="actor person" x="100" y="400">THE PERSON</text>
+<circle class="num person" cx="70" cy="418" r="14"/>
+<text class="numtx" x="70" y="418" text-anchor="middle" dominant-baseline="central">2</text>
+<text class="ttl person" x="100" y="424">Accept and register</text>
+<text class="dsc person" x="100" y="448">The person opens the link, accepts, enters their name and uploads an ID</text>
+<text class="dsc person" x="100" y="468">document with its expiry date.</text>
+<rect class="card person" x="40" y="532" width="620" height="132" rx="10"/>
+<text class="actor person" x="100" y="554">THE PERSON</text>
+<rect class="pill" x="564" y="541" width="80" height="20" rx="10"/>
+<text class="pilltx" x="604" y="551" text-anchor="middle" dominant-baseline="central">New in v2</text>
+<circle class="num person" cx="70" cy="572" r="14"/>
+<text class="numtx" x="70" y="572" text-anchor="middle" dominant-baseline="central">3</text>
+<text class="ttl person" x="100" y="578">Confirm the life-saving rules</text>
+<text class="dsc person" x="100" y="602">They read the rules and tick one statement saying they read and</text>
+<text class="dsc person" x="100" y="622">understood them. The wording, rules version and time are stored.</text>
+<rect class="card staff" x="40" y="686" width="620" height="132" rx="10"/>
+<text class="actor staff" x="100" y="708">RENEWI STAFF</text>
+<circle class="num staff" cx="70" cy="726" r="14"/>
+<text class="numtx" x="70" y="726" text-anchor="middle" dominant-baseline="central">4</text>
+<text class="ttl staff" x="100" y="732">Review the evidence</text>
+<text class="dsc staff" x="100" y="756">Staff compare the ID with what was entered, then verify or reject it.</text>
+<text class="dsc staff" x="100" y="776">Nothing moves forward until the ID is verified.</text>
+<rect class="card staff" x="40" y="840" width="620" height="132" rx="10"/>
+<text class="actor staff" x="100" y="862">RENEWI STAFF</text>
+<circle class="num staff" cx="70" cy="880" r="14"/>
+<text class="numtx" x="70" y="880" text-anchor="middle" dominant-baseline="central">5</text>
+<text class="ttl staff" x="100" y="886">Training and approval</text>
+<text class="dsc staff" x="100" y="910">An administrator confirms the safety and site-rules training, then staff</text>
+<text class="dsc staff" x="100" y="930">approve. The system checks the blacklist, compliance and the life-saving</text>
+<text class="dsc staff" x="100" y="950">confirmation.</text>
+<rect class="card system" x="40" y="994" width="620" height="132" rx="10"/>
+<text class="actor system" x="100" y="1016">THE SYSTEM</text>
+<circle class="num system" cx="70" cy="1034" r="14"/>
+<text class="numtx" x="70" y="1034" text-anchor="middle" dominant-baseline="central">6</text>
+<text class="ttl system" x="100" y="1040">Access QR issued</text>
+<text class="dsc system" x="100" y="1064">A QR code is emailed to the person and is valid for the visit window.</text>
+<text class="dsc system" x="100" y="1084">Only a hash of it is stored on the server.</text>
+<path class="arr" d="M350 356 L350 368" fill="none" marker-end="url(#ah)"/>
+<path class="arr" d="M350 510 L350 522" fill="none" marker-end="url(#ah)"/>
+<path class="arr" d="M350 664 L350 676" fill="none" marker-end="url(#ah)"/>
+<path class="arr" d="M350 818 L350 830" fill="none" marker-end="url(#ah)"/>
+<path class="arr" d="M350 972 L350 984" fill="none" marker-end="url(#ah)"/>
+<rect class="card person" x="740" y="224" width="620" height="132" rx="10"/>
+<text class="actor person" x="800" y="246">THE PERSON</text>
+<circle class="num person" cx="770" cy="264" r="14"/>
+<text class="numtx" x="770" y="264" text-anchor="middle" dominant-baseline="central">1</text>
+<text class="ttl person" x="800" y="270">Scan the entrance sign</text>
+<text class="dsc person" x="800" y="294">A fixed QR code at the entrance opens the registration page. No app and</text>
+<text class="dsc person" x="800" y="314">no invitation are needed.</text>
+<rect class="card person" x="740" y="378" width="620" height="132" rx="10"/>
+<text class="actor person" x="800" y="400">THE PERSON</text>
+<circle class="num person" cx="770" cy="418" r="14"/>
+<text class="numtx" x="770" y="418" text-anchor="middle" dominant-baseline="central">2</text>
+<text class="ttl person" x="800" y="424">Fill in the form</text>
+<text class="dsc person" x="800" y="448">First name, last name, company, email, and which of the six categories</text>
+<text class="dsc person" x="800" y="468">they are, the same as an invitation.</text>
+<rect class="card person" x="740" y="532" width="620" height="132" rx="10"/>
+<text class="actor person" x="800" y="554">THE PERSON</text>
+<circle class="num person" cx="770" cy="572" r="14"/>
+<text class="numtx" x="770" y="572" text-anchor="middle" dominant-baseline="central">3</text>
+<text class="ttl person" x="800" y="578">Confirm the life-saving rules</text>
+<text class="dsc person" x="800" y="602">The same rules and the same tick box as Path A, in English or Dutch. The</text>
+<text class="dsc person" x="800" y="622">wording, rules version and time are stored.</text>
+<rect class="card system" x="740" y="686" width="620" height="132" rx="10"/>
+<text class="actor system" x="800" y="708">THE SYSTEM</text>
+<circle class="num system" cx="770" cy="726" r="14"/>
+<text class="numtx" x="770" y="726" text-anchor="middle" dominant-baseline="central">4</text>
+<text class="ttl system" x="800" y="732">Check the email address</text>
+<text class="dsc system" x="800" y="756">A 6-digit code is emailed. Nothing is saved until it is entered. It</text>
+<text class="dsc system" x="800" y="776">lasts 10 minutes, allows 5 tries and resends are limited.</text>
+<rect class="card system" x="740" y="840" width="620" height="132" rx="10"/>
+<text class="actor system" x="800" y="862">THE SYSTEM</text>
+<circle class="num system" cx="770" cy="880" r="14"/>
+<text class="numtx" x="770" y="880" text-anchor="middle" dominant-baseline="central">5</text>
+<text class="ttl system" x="800" y="886">Entry QR issued</text>
+<text class="dsc system" x="800" y="910">The person&#x27;s phone shows a QR code and an 8-character reference, valid</text>
+<text class="dsc system" x="800" y="930">for 12 hours. The QR can be downloaded.</text>
+<path class="arr" d="M1050 356 L1050 368" fill="none" marker-end="url(#ah)"/>
+<path class="arr" d="M1050 510 L1050 522" fill="none" marker-end="url(#ah)"/>
+<path class="arr" d="M1050 664 L1050 676" fill="none" marker-end="url(#ah)"/>
+<path class="arr" d="M1050 818 L1050 830" fill="none" marker-end="url(#ah)"/>
+<rect class="card open dashed" x="740" y="994" width="620" height="132" rx="10"/>
+<text class="actor open" x="758" y="1016">OPEN QUESTION</text>
+<text class="ttl open" x="758" y="1040">Open for Renewi to decide</text>
+<text class="dsc open" x="758" y="1064">Who may use Path B, and how do we know they are expected? Today the officer&#x27;s</text>
+<text class="dsc open" x="758" y="1084">own judgment is the only check on who the person is.</text>
+<path class="arr" d="M350 1126 L350 1166 L700 1166 L700 1206" fill="none" marker-end="url(#ah)"/>
+<path class="arr" d="M1360 906 L1386 906 L1386 1166 L700 1166 L700 1206" fill="none" marker-end="url(#ah)"/>
+<rect class="lane" x="40" y="1216" width="1320" height="56" rx="10"/>
+<text class="lanet" x="60" y="1238" dominant-baseline="central">At the gate</text>
+<text class="lanes" x="60" y="1258" dominant-baseline="central">One kiosk with two panels. Both paths end here.</text>
+<rect class="card officer" x="40" y="1306" width="300" height="172" rx="10"/>
+<text class="actor officer" x="58" y="1328">GATE OFFICER</text>
+<text class="ttl officer" x="58" y="1352">Read the code</text>
+<text class="dsc officer" x="58" y="1376">Path A: upload the access QR in the</text>
+<text class="dsc officer" x="58" y="1396">lower panel. Path B: scan the entry</text>
+<text class="dsc officer" x="58" y="1416">QR, or type the reference, in the</text>
+<text class="dsc officer" x="58" y="1436">top panel.</text>
+<rect class="card system" x="380" y="1306" width="300" height="172" rx="10"/>
+<text class="actor system" x="398" y="1328">THE SYSTEM</text>
+<rect class="pill" x="584" y="1315" width="80" height="20" rx="10"/>
+<text class="pilltx" x="624" y="1325" text-anchor="middle" dominant-baseline="central">New in v2</text>
+<text class="ttl system" x="398" y="1352">Check the records</text>
+<text class="dsc system" x="398" y="1376">Path A: ID verified, approval,</text>
+<text class="dsc system" x="398" y="1396">visit window, blacklist, rules</text>
+<text class="dsc system" x="398" y="1416">confirmed. Path B: rules current,</text>
+<text class="dsc system" x="398" y="1436">not blocked or blacklisted, has not</text>
+<text class="dsc system" x="398" y="1456">already left.</text>
+<rect class="card decision dashed" x="720" y="1306" width="300" height="172" rx="10"/>
+<text class="actor decision" x="738" y="1328">DECISION</text>
+<text class="ttl decision" x="738" y="1352">May the person enter?</text>
+<text class="dsc decision" x="738" y="1376">Yes: the officer can let them in.</text>
+<text class="dsc decision" x="738" y="1396">No: the screen shows the reason,</text>
+<text class="dsc decision" x="738" y="1416">the refusal is recorded and nobody</text>
+<text class="dsc decision" x="738" y="1436">is admitted.</text>
+<rect class="card officer" x="1060" y="1306" width="300" height="172" rx="10"/>
+<text class="actor officer" x="1078" y="1328">GATE OFFICER</text>
+<text class="ttl officer" x="1078" y="1352">Compare and let in</text>
+<text class="dsc officer" x="1078" y="1376">The officer looks at the person and</text>
+<text class="dsc officer" x="1078" y="1396">the screen or ID, then presses Let</text>
+<text class="dsc officer" x="1078" y="1416">in or Refuse entry. Either choice</text>
+<text class="dsc officer" x="1078" y="1436">goes into the audit trail.</text>
+<path class="arr" d="M340 1392 L370 1392" fill="none" marker-end="url(#ah)"/>
+<path class="arr" d="M680 1392 L710 1392" fill="none" marker-end="url(#ah)"/>
+<path class="arr" d="M1020 1392 L1050 1392" fill="none" marker-end="url(#ah)"/>
+<text class="lbl" x="1040" y="1380" text-anchor="middle">yes</text>
+<path class="arr" d="M870 1478 L870 1504" fill="none" marker-end="url(#ah)"/>
+<text class="lbl" x="884" y="1498">no</text>
+<path class="arr" d="M1210 1478 L1210 1504" fill="none" marker-end="url(#ah)"/>
+<text class="lbl" x="1224" y="1498">refuses</text>
+<rect class="card deny" x="720" y="1514" width="300" height="132" rx="10"/>
+<text class="actor deny" x="738" y="1536">RESULT</text>
+<text class="ttl deny" x="738" y="1560">Do not admit</text>
+<text class="dsc deny" x="738" y="1584">The records forbid entry. The</text>
+<text class="dsc deny" x="738" y="1604">reason is shown and recorded in the</text>
+<text class="dsc deny" x="738" y="1624">audit trail.</text>
+<rect class="card deny" x="1060" y="1514" width="300" height="132" rx="10"/>
+<text class="actor deny" x="1078" y="1536">RESULT</text>
+<text class="ttl deny" x="1078" y="1560">Officer refuses entry</text>
+<text class="dsc deny" x="1078" y="1584">The person does not match their ID,</text>
+<text class="dsc deny" x="1078" y="1604">or nobody can confirm they are</text>
+<text class="dsc deny" x="1078" y="1624">expected. The reason is recorded.</text>
+<path class="arr" d="M1360 1392 L1386 1392 L1386 1676 L1300 1676 L1300 1692" fill="none" marker-end="url(#ah)"/>
+<rect class="lane" x="40" y="1702" width="1320" height="56" rx="10"/>
+<text class="lanet" x="60" y="1724" dominant-baseline="central">On site and after</text>
+<text class="lanes" x="60" y="1744" dominant-baseline="central">This applies to both paths.</text>
+<rect class="card system" x="40" y="1792" width="300" height="172" rx="10"/>
+<text class="actor system" x="58" y="1814">THE SYSTEM</text>
+<text class="ttl system" x="58" y="1838">Who is on site</text>
+<text class="dsc system" x="58" y="1862">One on-site roster on the Overview</text>
+<text class="dsc system" x="58" y="1882">and the dashboard counts cover both</text>
+<text class="dsc system" x="58" y="1902">paths. Walk-up people are marked as</text>
+<text class="dsc system" x="58" y="1922">walk-up arrivals.</text>
+<rect class="card officer" x="380" y="1792" width="300" height="172" rx="10"/>
+<text class="actor officer" x="398" y="1814">GATE OFFICER</text>
+<text class="ttl officer" x="398" y="1838">Record exit</text>
+<text class="dsc officer" x="398" y="1862">The officer presses Record exit, on</text>
+<text class="dsc officer" x="398" y="1882">the roster or the kiosk, when the</text>
+<text class="dsc officer" x="398" y="1902">person leaves. The counts update</text>
+<text class="dsc officer" x="398" y="1922">and the entry and exit times stay</text>
+<text class="dsc officer" x="398" y="1942">on record.</text>
+<rect class="card staff" x="720" y="1792" width="300" height="172" rx="10"/>
+<text class="actor staff" x="738" y="1814">RENEWI STAFF</text>
+<text class="ttl staff" x="738" y="1838">Renewals</text>
+<text class="dsc staff" x="738" y="1862">Expiring IDs are flagged and re-</text>
+<text class="dsc staff" x="738" y="1882">verified for Path A. A walk-up</text>
+<text class="dsc staff" x="738" y="1902">person who has left must register</text>
+<text class="dsc staff" x="738" y="1922">again to come back in.</text>
+<rect class="card system" x="1060" y="1792" width="300" height="172" rx="10"/>
+<text class="actor system" x="1078" y="1814">THE SYSTEM</text>
+<text class="ttl system" x="1078" y="1838">Audit trail</text>
+<text class="dsc system" x="1078" y="1862">Every step is recorded with who did</text>
+<text class="dsc system" x="1078" y="1882">it: registration, confirmation,</text>
+<text class="dsc system" x="1078" y="1902">entry, exit and refusals. Staff see</text>
+<text class="dsc system" x="1078" y="1922">it on the People and Audit pages.</text>
+<path class="arr" d="M340 1878 L370 1878" fill="none" marker-end="url(#ah)"/>
+</svg>
+</div>
+<p class="hint">On a narrow screen, scroll the diagram sideways.</p>
+<div class="gloss">
+<div><h2>Life-saving rules confirmation</h2><p>A statement the person ticks themselves. The exact wording, rules version and time are stored, and the gate checks it every time.</p></div>
+<div><h2>Access QR and entry QR</h2><p>The access QR comes from an invitation (Path A). The entry QR comes from walk-up registration (Path B). Each is read in its own kiosk panel.</p></div>
+<div><h2>Entrance sign</h2><p>One shared QR at the site entrance. It identifies the site and never a person.</p></div>
+<div><h2>Refusals</h2><p>Every refusal is stored in the audit trail with who, when and why, whether the system refused or the officer did. A refusal is a record and does not lock the person out.</p></div>
+<div><h2>Reference</h2><p>An 8-character code that stands in for the entry QR when the phone cannot be scanned.</p></div>
+</div>
+<p class="note">This describes the working demo. The rules wording is sample text. Renewi still has to supply the approved wording, decide who may use Path B, and decide how long records are kept.</p>
+</div>

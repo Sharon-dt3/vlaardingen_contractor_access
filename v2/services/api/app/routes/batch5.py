@@ -68,10 +68,13 @@ def get_current_presence(
         Deterministically ordered current-presence records.
     """
 
-    return [
-        CurrentPresenceResponse.model_validate(row)
-        for row in list_current_presence(database, site_id=site_id)
-    ]
+    from app.services.walk_up import walk_up_presence_rows
+
+    rows = list_current_presence(database, site_id=site_id) + walk_up_presence_rows(
+        database, site_id=site_id
+    )
+    rows.sort(key=lambda row: (row["site_name"], row["person_name"]))
+    return [CurrentPresenceResponse.model_validate(row) for row in rows]
 
 
 # PUBLIC_INTERFACE
@@ -174,13 +177,16 @@ def get_dashboard(
         Aggregate counters, per-site operations, presence, and recent decisions.
     """
 
+    from app.services.walk_up import merge_walk_ups_into_dashboard
+
     try:
-        return DashboardSnapshotResponse.model_validate(
-            get_dashboard_snapshot(
-                database,
-                activity_hours=activity_hours,
-                recent_limit=recent_limit,
-            )
+        snapshot = get_dashboard_snapshot(
+            database,
+            activity_hours=activity_hours,
+            recent_limit=recent_limit,
         )
+        # Walk-up people (entrance QR, no invitation) count in the same numbers.
+        merge_walk_ups_into_dashboard(database, snapshot, recent_limit=recent_limit)
+        return DashboardSnapshotResponse.model_validate(snapshot)
     except WorkflowError as error:
         _raise_api_error(error)

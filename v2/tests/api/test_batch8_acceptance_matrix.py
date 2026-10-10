@@ -315,6 +315,12 @@ def test_dashboard_route_drops_internal_token_and_provider_data(
         "get_dashboard_snapshot",
         lambda *_args, **_kwargs: snapshot,
     )
+    # This test checks what the route leaves out. Merging walk-up people needs a real
+    # database and is covered in test_walk_up.py.
+    monkeypatch.setattr(
+        "app.services.walk_up.merge_walk_ups_into_dashboard",
+        lambda _database, merged, **_kwargs: merged,
+    )
 
     with TestClient(application) as client:
         response = client.get("/api/dashboard")

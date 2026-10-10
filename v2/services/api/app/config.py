@@ -85,9 +85,19 @@ class Settings(BaseSettings):
         validation_alias="ANTHROPIC_API_KEY",
     )
     anthropic_model: str = Field(
-        default="claude-sonnet-4-20250514",
+        default="claude-sonnet-5-5",
         validation_alias="ANTHROPIC_MODEL",
     )
+    bedrock_access_key_id: SecretStr | None = Field(
+        default=None,
+        validation_alias="BEDROCK_ACCESS_KEY_ID",
+    )
+    bedrock_secret_access_key: SecretStr | None = Field(
+        default=None,
+        validation_alias="BEDROCK_SECRET_ACCESS_KEY",
+    )
+    bedrock_region: str = Field(default="eu-central-1", validation_alias="BEDROCK_REGION")
+    bedrock_model_id: str = Field(default="", validation_alias="BEDROCK_MODEL_ID")
     s3_endpoint_url: str = Field(default="", validation_alias="S3_ENDPOINT_URL")
     s3_region: str = Field(default="", validation_alias="S3_REGION")
     s3_bucket: str = Field(default="", validation_alias="S3_BUCKET")
@@ -107,6 +117,9 @@ class Settings(BaseSettings):
         default=None,
         validation_alias="IDENTITY_PROVIDER_API_KEY",
     )
+    # "on": walk-up people must enter a code emailed to them before they are registered.
+    # "off": no email check (for setups without a mail server).
+    walk_up_email_check: str = Field(default="on", validation_alias="WALK_UP_EMAIL_CHECK")
     smtp_host: str = Field(default="smtp.gmail.com", validation_alias="SMTP_HOST")
     smtp_port: int = Field(default=587, ge=1, le=65535, validation_alias="SMTP_PORT")
     smtp_username: str = Field(default="", validation_alias="SMTP_USERNAME")
@@ -141,8 +154,21 @@ class Settings(BaseSettings):
             self.demo_seed_password = SecretStr("renewi-demo-access")
             notices.append("Selected the deterministic local demo seed password.")
 
-        if self.ocr_provider != "mock" and not self._secret_is_set(
-            self.anthropic_api_key
+        if self.ocr_provider == "bedrock":
+            bedrock_configured = bool(
+                self._secret_is_set(self.bedrock_access_key_id)
+                and self._secret_is_set(self.bedrock_secret_access_key)
+                and self.bedrock_region
+                and self.bedrock_model_id
+            )
+        else:
+            bedrock_configured = False
+        if self.ocr_provider != "mock" and not (
+            bedrock_configured
+            or (
+                self.ocr_provider == "anthropic"
+                and self._secret_is_set(self.anthropic_api_key)
+            )
         ):
             self.ocr_provider = "mock"
             notices.append(
@@ -158,7 +184,9 @@ class Settings(BaseSettings):
                 self._secret_is_set(self.s3_secret_access_key),
             )
         )
-        if self.storage_provider != "local" and not s3_configured:
+        if self.storage_provider != "local" and s3_configured:
+            self.storage_provider = "s3"
+        elif self.storage_provider != "local":
             self.storage_provider = "local"
             notices.append(
                 "Object storage integration is incomplete; selected private local storage."

@@ -22,6 +22,17 @@ _SUPPORTED_MEDIA_TYPES = frozenset(
     {"application/pdf", "image/jpeg", "image/png"}
 )
 _SYNTHETIC_MARKERS = (b"DEMO", b"NOT A REAL CREDENTIAL")
+_EXTRACTION_PROMPT = (
+        "Extract fields from this Netherlands identity document. It must be "
+        "a Netherlands identity card or Netherlands driving licence. Return "
+        "only valid JSON with this exact shape: "
+        '{"document_type":"netherlands_identity_card|netherlands_driving_licence|unsupported",'
+        '"holder_name":"string|null","document_number":"string|null",'
+        '"nationality":"string|null","issue_date":"YYYY-MM-DD|null",'
+        '"expiry_date":"YYYY-MM-DD|null","categories":["string"],'
+        '"code_95":true|false|null}. Do not infer missing values. '
+        "This is extraction only, not a verification or access decision."
+)
 
 
 # PUBLIC_INTERFACE
@@ -93,6 +104,8 @@ _DEFAULT_FIELDS: dict[EvidenceType, dict[str, Any]] = {
 class MockDocumentParser:
     """Credential-free parser returning stable fields for synthetic evidence."""
 
+    reads_real_documents = False
+
     # PUBLIC_INTERFACE
     def extract(
         self,
@@ -122,6 +135,9 @@ class MockDocumentParser:
 # PUBLIC_INTERFACE
 class AnthropicDocumentParser:
     """Server-side Anthropic Vision extractor for Dutch identity documents."""
+
+    reads_real_documents = True
+    _provider_name = "anthropic"
 
     # PUBLIC_INTERFACE
     def __init__(
@@ -187,7 +203,7 @@ class AnthropicDocumentParser:
             field_confidence={key: 0.9 for key in fields},
             provider_mode="EXTERNAL",
             processing_metadata={
-                "provider": "anthropic",
+                "provider": self._provider_name,
                 "model": self._model,
                 "document_type": response["document_type"],
             },
@@ -203,17 +219,7 @@ class AnthropicDocumentParser:
 
         encoded_content = base64.b64encode(content).decode("ascii")
         source_type = "document" if media_type == "application/pdf" else "image"
-        prompt = (
-            "Extract fields from this Netherlands identity document. It must be "
-            "a Netherlands identity card or Netherlands driving licence. Return "
-            "only valid JSON with this exact shape: "
-            '{"document_type":"netherlands_identity_card|netherlands_driving_licence|unsupported",'
-            '"holder_name":"string|null","document_number":"string|null",'
-            '"nationality":"string|null","issue_date":"YYYY-MM-DD|null",'
-            '"expiry_date":"YYYY-MM-DD|null","categories":["string"],'
-            '"code_95":true|false|null}. Do not infer missing values. '
-            "This is extraction only, not a verification or access decision."
-        )
+        prompt = _EXTRACTION_PROMPT
         payload = {
             "model": self._model,
             "max_tokens": 700,
@@ -278,6 +284,12 @@ class AnthropicDocumentParser:
             ),
             None,
         )
+        return self._parse_model_json(text)
+
+    @staticmethod
+    def _parse_model_json(text: Any) -> dict[str, Any]:
+        """Turn the model's text reply into the constrained JSON object."""
+
         if not isinstance(text, str):
             raise DocumentExtractionError(
                 "The document extraction provider returned an invalid response."
@@ -344,3 +356,109 @@ class AnthropicDocumentParser:
                 "The document extraction result is incomplete; request a clearer upload."
             )
         return fields
+
+
+# PUBLIC_INTERFACE
+class BedrockDocumentParser(AnthropicDocumentParser):
+    """Claude on Amazon Bedrock as the identity-document extractor.
+
+    Same prompt, same validation and same human-review workflow as the direct
+    Anthropic adapter; only the transport differs (AWS-signed Converse calls).
+    """
+
+    _provider_name = "bedrock"
+
+    # PUBLIC_INTERFACE
+    def __init__(
+        self,
+        *,
+        access_key_id: str,
+        secret_access_key: str,
+        region: str,
+        model_id: str,
+        storage: StorageProvider,
+    ) -> None:
+        """Initialize with server-only AWS credentials and private storage."""
+
+        super().__init__(api_key="", model=model_id, storage=storage)
+        import boto3
+        from botocore.config import Config
+
+        self._client = boto3.client(
+            "bedrock-runtime",
+            region_name=region,
+            aws_access_key_id=access_key_id,
+            aws_secret_access_key=secret_access_key,
+            config=Config(
+                connect_timeout=10,
+                read_timeout=30,
+                retries={"max_attempts": 2, "mode": "standard"},
+            ),
+        )
+
+    def _request_extraction(
+        self,
+        *,
+        content: bytes,
+        media_type: str,
+    ) -> dict[str, Any]:
+        """Send the constrained extraction request without logging sensitive data."""
+
+        from botocore.exceptions import BotoCoreError, ClientError
+
+        if media_type == "application/pdf":
+            attachment = {
+                "document": {
+                    "format": "pdf",
+                    "name": "identity-document",
+                    "source": {"bytes": content},
+                }
+            }
+        else:
+            attachment = {
+                "image": {
+                    "format": "png" if media_type == "image/png" else "jpeg",
+                    "source": {"bytes": content},
+                }
+            }
+        try:
+            response = self._client.converse(
+                modelId=self._model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [attachment, {"text": _EXTRACTION_PROMPT}],
+                    }
+                ],
+                inferenceConfig={"maxTokens": 700, "temperature": 0},
+            )
+        except ClientError as error:
+            code = error.response.get("Error", {}).get("Code", "")
+            # Log only the upstream code: credentials and document contents must
+            # never enter application logs.
+            _LOGGER.warning("Bedrock document extraction failed (%s).", code)
+            if code in {
+                "AccessDeniedException",
+                "UnrecognizedClientException",
+                "InvalidSignatureException",
+                "ExpiredTokenException",
+            }:
+                raise DocumentExtractionError(
+                    "The document extraction provider rejected its server-side "
+                    "credentials or model access. Contact an administrator to "
+                    "update the configured provider credential."
+                ) from error
+            raise DocumentExtractionError(
+                "The document extraction provider is temporarily unavailable."
+            ) from error
+        except BotoCoreError as error:
+            raise DocumentExtractionError(
+                "The document extraction provider is temporarily unavailable."
+            ) from error
+
+        blocks = response.get("output", {}).get("message", {}).get("content", [])
+        text = next(
+            (b.get("text") for b in blocks if isinstance(b, dict) and "text" in b),
+            None,
+        )
+        return self._parse_model_json(text)

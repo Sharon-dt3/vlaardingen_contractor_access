@@ -9,6 +9,7 @@ import {
   LogOut,
   MailPlus,
   Menu,
+  QrCode,
   ScanLine,
   Settings,
   ShieldCheck,
@@ -46,6 +47,7 @@ const navigation: NavigationItem[] = [
     icon: Building2,
     permission: "companies:read"
   },
+  { label: "Walk-up arrivals", href: "/walk-up", icon: QrCode, permission: "people:read" },
   { label: "Visits", href: "/visits", icon: ClipboardList, permission: "visits:read" },
   {
     label: "Gate kiosk",
@@ -179,7 +181,7 @@ export function AppShell({ children }: AppShellProps) {
   const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
   const mobileNavigationCloseRef = useRef<HTMLButtonElement>(null);
   const isLoginRoute = pathname === "/login";
-  const isInviteeRoute = pathname === "/register";
+  const isInviteeRoute = pathname === "/register" || pathname.startsWith("/arrive/");
 
   useEffect(() => {
     document.body.style.overflow = mobileOpen ? "hidden" : "";

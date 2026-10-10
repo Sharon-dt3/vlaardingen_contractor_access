@@ -377,18 +377,22 @@ export type GateDecisionResponse = {
 };
 
 export type CurrentPresence = {
-  gate_event_id: string;
+  gate_event_id: string | null;
   presence_event_id: string | null;
   person_id: string;
   person_name: string;
   population: string;
   id_expiry_date: string | null;
-  visit_id: string;
+  visit_id: string | null;
   site_id: string;
   site_name: string;
   entered_at: string;
-  visit_ends_at: string;
+  visit_ends_at: string | null;
   decision: GateDecision;
+  /** "walk_up" for someone who registered at the entrance QR; they have no visit. */
+  source?: string;
+  walk_up_registration_id?: string | null;
+  site_key?: string | null;
 };
 
 export type PresenceEvent = {
@@ -433,6 +437,7 @@ export type DashboardDecision = {
   person_name: string | null;
   decision: GateDecision;
   reason_codes: string[];
+  source?: string;
 };
 
 export type DashboardSnapshot = {

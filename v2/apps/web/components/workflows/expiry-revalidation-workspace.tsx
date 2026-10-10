@@ -64,6 +64,8 @@ export function ExpiryRevalidationWorkspace() {
   const people = Array.from(
     new Map(
       (presenceQuery.data ?? [])
+        // Walk-up people have no verified ID on file to renew.
+        .filter((person) => person.source !== "walk_up")
         .filter((person) => ![
           "renewi_driver",
           "temporary_driver",

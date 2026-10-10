@@ -91,9 +91,16 @@ type EvidenceEditForm = z.infer<typeof evidenceEditSchema>;
 // before the browser sends a multipart request.
 const MAX_EVIDENCE_UPLOAD_BYTES = 5 * 1024 * 1024;
 
-function defaultDateTime(effectiveAt: string, hoursFromNow: number): string {
+// A start rounds down, so the suggested visit has already begun and the gate accepts it right away;
+// an end rounds up, so it never falls before the demo time.
+function defaultDateTime(
+  effectiveAt: string,
+  hoursFromNow: number,
+  rounding: "up" | "down" = "up"
+): string {
   const date = new Date(new Date(effectiveAt).getTime() + hoursFromNow * 60 * 60 * 1000);
-  date.setMinutes(Math.ceil(date.getMinutes() / 15) * 15, 0, 0);
+  const round = rounding === "down" ? Math.floor : Math.ceil;
+  date.setMinutes(round(date.getMinutes() / 15) * 15, 0, 0);
   return new Date(date.getTime() - date.getTimezoneOffset() * 60000)
     .toISOString()
     .slice(0, 16);
@@ -350,10 +357,10 @@ function InvitationCreatePanel({
     if (!clockQuery.data) return;
     // Do not overwrite either field once the requester has chosen a visit window.
     if (!form.getFieldState("starts_at").isDirty) {
-      form.setValue("starts_at", defaultDateTime(clockQuery.data.effective_at, 24));
+      form.setValue("starts_at", defaultDateTime(clockQuery.data.effective_at, 0, "down"));
     }
     if (!form.getFieldState("ends_at").isDirty) {
-      form.setValue("ends_at", defaultDateTime(clockQuery.data.effective_at, 32));
+      form.setValue("ends_at", defaultDateTime(clockQuery.data.effective_at, 8));
     }
   }, [clockQuery.data, form]);
 

@@ -1,8 +1,11 @@
 """Configured provider composition for API domain services."""
 
+from functools import lru_cache
+
 from app.config import get_settings
 from app.providers.documents import (
     AnthropicDocumentParser,
+    BedrockDocumentParser,
     DocumentExtractionError,
     DocumentExtractionProvider,
     ExtractionResult,
@@ -18,7 +21,7 @@ from app.providers.notifications import (
     NotificationDeliveryResult,
     NotificationProvider,
 )
-from app.providers.storage import LocalStorage, StorageProvider, StoredObject
+from app.providers.storage import LocalStorage, S3Storage, StorageProvider, StoredObject
 
 
 # PUBLIC_INTERFACE
@@ -36,19 +39,60 @@ def get_document_extraction_provider() -> DocumentExtractionProvider:
                 model=settings.anthropic_model,
                 storage=get_storage_provider(),
             )
+    if (
+        settings.ocr_provider == "bedrock"
+        and settings.bedrock_access_key_id
+        and settings.bedrock_secret_access_key
+    ):
+        access_key_id = settings.bedrock_access_key_id.get_secret_value()
+        secret_access_key = settings.bedrock_secret_access_key.get_secret_value()
+        if access_key_id and secret_access_key:
+            return BedrockDocumentParser(
+                access_key_id=access_key_id,
+                secret_access_key=secret_access_key,
+                region=settings.bedrock_region,
+                model_id=settings.bedrock_model_id,
+                storage=get_storage_provider(),
+            )
     raise RuntimeError("The configured document extraction adapter is unavailable.")
 
 
 # PUBLIC_INTERFACE
 def get_storage_provider() -> StorageProvider:
-    """Return private local storage selected by validated runtime settings."""
+    """Return private local or S3-compatible storage selected by validated settings."""
 
     settings = get_settings()
-    if settings.storage_provider != "local":
-        raise RuntimeError(
-            "The configured external storage adapter is not available in this demo."
+    if settings.storage_provider == "local":
+        return LocalStorage(settings.storage_local_path)
+    if settings.storage_provider == "s3":
+        return _s3_storage(
+            settings.s3_endpoint_url,
+            settings.s3_region,
+            settings.s3_bucket,
+            settings.s3_access_key_id.get_secret_value(),
+            settings.s3_secret_access_key.get_secret_value(),
         )
-    return LocalStorage(settings.storage_local_path)
+    raise RuntimeError("The configured external storage adapter is unavailable.")
+
+
+@lru_cache(maxsize=1)
+def _s3_storage(
+    endpoint_url: str, region: str, bucket: str, access_key_id: str, secret_access_key: str
+) -> S3Storage:
+    """Build one reusable S3 client; boto3 clients are thread-safe."""
+
+    import boto3
+    from botocore.config import Config
+
+    client = boto3.client(
+        "s3",
+        endpoint_url=endpoint_url,
+        region_name=region,
+        aws_access_key_id=access_key_id,
+        aws_secret_access_key=secret_access_key,
+        config=Config(signature_version="s3v4", retries={"max_attempts": 3, "mode": "standard"}),
+    )
+    return S3Storage(client, bucket)
 
 
 # PUBLIC_INTERFACE
@@ -78,7 +122,9 @@ __all__ = [
     "IdentityVerificationResult",
     "InAppNotificationProvider",
     "LocalStorage",
+    "S3Storage",
     "AnthropicDocumentParser",
+    "BedrockDocumentParser",
     "MockDocumentParser",
     "MockIdentityVerifier",
     "NotificationDeliveryResult",

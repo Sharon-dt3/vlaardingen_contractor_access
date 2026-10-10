@@ -6,7 +6,9 @@ import hashlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
+
+from botocore.exceptions import ClientError
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -138,3 +140,72 @@ class LocalStorage:
         if root not in target.parents:
             raise ValueError("Storage reference escapes the private root.")
         return target
+
+
+# PUBLIC_INTERFACE
+class S3Storage:
+    """Private S3-compatible object storage with server-side encryption.
+
+    Objects use the same content-addressed references as local storage, so the
+    database never needs to know which provider holds the bytes. The bucket must
+    be private; this class never creates public URLs or presigned links.
+    """
+
+    # PUBLIC_INTERFACE
+    def __init__(self, client: Any, bucket: str) -> None:
+        """Wrap a boto3 S3 client and the private bucket it writes to."""
+
+        self._client = client
+        self._bucket = bucket
+
+    # PUBLIC_INTERFACE
+    def put(self, content: bytes) -> StoredObject:
+        """Persist bytes under a deterministic content-addressed key."""
+
+        digest = hashlib.sha256(content).hexdigest()
+        reference = f"objects/{digest[:2]}/{digest}"
+        if not self._exists(reference):
+            self._client.put_object(
+                Bucket=self._bucket,
+                Key=reference,
+                Body=content,
+                ServerSideEncryption="AES256",
+            )
+        return StoredObject(
+            reference=reference,
+            sha256=digest,
+            size_bytes=len(content),
+            mode="EXTERNAL",
+        )
+
+    # PUBLIC_INTERFACE
+    def get(self, reference: str) -> bytes:
+        """Read an object after validating its opaque reference."""
+
+        self._check(reference)
+        try:
+            response = self._client.get_object(Bucket=self._bucket, Key=reference)
+        except self._client.exceptions.NoSuchKey as error:
+            raise FileNotFoundError("Private evidence content is unavailable.") from error
+        return response["Body"].read()
+
+    # PUBLIC_INTERFACE
+    def delete(self, reference: str) -> None:
+        """Remove one object; S3 treats an absent key as already erased."""
+
+        self._check(reference)
+        self._client.delete_object(Bucket=self._bucket, Key=reference)
+
+    def _exists(self, reference: str) -> bool:
+        try:
+            self._client.head_object(Bucket=self._bucket, Key=reference)
+        except ClientError as error:
+            if error.response.get("Error", {}).get("Code") in {"404", "NoSuchKey", "NotFound"}:
+                return False
+            raise
+        return True
+
+    @staticmethod
+    def _check(reference: str) -> None:
+        if not _STORAGE_REFERENCE.fullmatch(reference):
+            raise ValueError("Invalid private storage reference.")
