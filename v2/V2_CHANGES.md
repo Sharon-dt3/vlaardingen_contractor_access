@@ -102,7 +102,10 @@ invitation flow was removed or changed.
    (reused if the same name and email arrived before), the exact wording confirmed, the rules
    version, language, a hash of the rules shown, the time, and the arrival. Both are audited.
 4. The person sees "You are registered" with **a QR code, a Download QR button (saves a PNG) and a short
-   reference** to show at the kiosk.
+   reference** to show at the kiosk. After the email check, a copy of the QR is also **emailed** to the
+   verified address (as a PNG attachment with the reference and the time it is valid until), so the person
+   still has it if they close the page. The send happens after the page is returned and never undoes the
+   registration if it fails. Without the email check the address is unverified, so nothing is sent to it.
    The QR holds a random secret; only its hash is stored. It is valid for 12 hours.
 5. **At the kiosk** (the Gate kiosk page, above the original invitation kiosk, which is unchanged) the
    operator scans that QR with the camera or an uploaded image, or types the reference. A scan fills the

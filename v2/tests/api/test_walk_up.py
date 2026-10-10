@@ -245,6 +245,7 @@ def test_api_registration_round_trip_and_error_codes(client: TestClient, databas
     receipt = ok.json()
     assert set(receipt) == {
         "reference", "site_name", "registered_at", "rules_version", "language", "pass_qr", "pass_valid_until",
+        "emailed_to",
     }
     assert len(receipt["reference"]) == 8 and ok.headers["cache-control"] == "no-store"
     database.commit()  # the route rolls back rejected requests; keep the setup
@@ -637,13 +638,16 @@ def checked_client(database: Session, monkeypatch):
     walk_up_routes._registration_limiter.reset()
     walk_up_routes._verify_limiter.reset()
     sent: list[dict] = []
+    passes: list[dict] = []
     monkeypatch.setattr(walk_up_routes, "email_check_enabled", lambda: True)
+    monkeypatch.setattr(walk_up_routes, "send_walk_up_pass_email", lambda settings, **kw: passes.append(kw))
     monkeypatch.setattr(
         walk_up_routes, "get_settings", lambda: SimpleNamespace(notification_provider="smtp", web_origin="http://x")
     )
     monkeypatch.setattr(walk_up_routes, "send_walk_up_code_email", lambda settings, **kw: sent.append(kw))
     client = TestClient(app)
     client.sent = sent  # type: ignore[attr-defined]
+    client.passes = passes  # type: ignore[attr-defined]
     return client
 
 
@@ -1088,3 +1092,54 @@ def test_the_kiosk_endpoint_writes_the_lookup_event(client: TestClient, database
     client.app.dependency_overrides[get_current_user] = lambda: _admin(database)
     found = client.post("/api/walk-up/gate/lookup", json={"site_key": "vlaardingen", "code": receipt["reference"]}).json()
     assert len(_lookups(database, uuid.UUID(found["registration_id"]))) == 1
+
+
+# --- the entry QR is also emailed ---------------------------------------------
+
+
+def test_the_entry_qr_is_emailed_to_the_verified_address(checked_client: TestClient, database: Session) -> None:
+    import base64
+
+    started = checked_client.post("/api/walk-up/registrations", json=_body(database)).json()
+    code = checked_client.sent[0]["code"]
+    database.commit()
+    assert checked_client.passes == []  # nothing is sent until the code is right
+
+    ok = checked_client.post(
+        "/api/walk-up/registrations/verify", json={"pending_id": started["pending_id"], "code": code}
+    )
+    assert ok.status_code == 201
+    receipt = ok.json()
+    assert receipt["emailed_to"] == "a***@example.com"
+    assert len(checked_client.passes) == 1
+    mail = checked_client.passes[0]
+    assert mail["to"] == "anna.deboer@example.com" and mail["reference"] == receipt["reference"]
+    assert mail["site_name"] == "Vlaardingen" and mail["first_name"] == "Anna"
+    assert mail["qr_png"][:8] == b"\x89PNG\r\n\x1a\n"
+    # The emailed image is the one shown on the page.
+    assert mail["qr_png"] == base64.b64decode(receipt["pass_qr"].split(",", 1)[1])
+
+
+def test_a_failed_qr_email_does_not_undo_the_registration(checked_client: TestClient, database: Session, monkeypatch) -> None:
+    from app.providers.walk_up_email import WalkUpEmailError
+
+    def boom(settings, **kw):
+        raise WalkUpEmailError("down")
+
+    monkeypatch.setattr(walk_up_routes, "send_walk_up_pass_email", boom)
+    started = checked_client.post("/api/walk-up/registrations", json=_body(database)).json()
+    code = checked_client.sent[0]["code"]
+    database.commit()
+    ok = checked_client.post(
+        "/api/walk-up/registrations/verify", json={"pending_id": started["pending_id"], "code": code}
+    )
+    assert ok.status_code == 201 and ok.json()["pass_qr"].startswith("data:image/png")
+    assert database.scalar(select(func.count()).select_from(WalkUpRegistration)) >= 1
+
+
+def test_without_the_email_check_the_qr_is_not_emailed(client: TestClient, database: Session, monkeypatch) -> None:
+    sent: list[dict] = []
+    monkeypatch.setattr(walk_up_routes, "send_walk_up_pass_email", lambda settings, **kw: sent.append(kw))
+    ok = client.post("/api/walk-up/registrations", json=_body(database))
+    assert ok.status_code == 201 and ok.json()["emailed_to"] is None
+    assert sent == []  # the address was never verified, so nothing is sent to it

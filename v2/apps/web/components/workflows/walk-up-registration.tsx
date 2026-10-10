@@ -25,6 +25,7 @@ type Receipt = {
   language: string;
   pass_qr: string;
   pass_valid_until: string;
+  emailed_to?: string | null;
 };
 
 type Pending = {
@@ -280,6 +281,12 @@ export function WalkUpRegistration({ siteKey }: { siteKey: string }) {
               {new Date(receipt.pass_valid_until).toLocaleString()}.
             </p>
           </div>
+          {receipt.emailed_to ? (
+            <p className="text-sm text-emerald-900">
+              A copy of this QR is being emailed to <strong>{receipt.emailed_to}</strong>. Check your spam
+              folder if it does not arrive. You can show it from your email at the gate.
+            </p>
+          ) : null}
           <p className="text-sm text-emerald-900">
             Go to the gate kiosk and show this QR code, or give your reference. The gate operator
             will check your registration and let you in. Keep this screen open, and follow the

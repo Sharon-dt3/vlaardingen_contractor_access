@@ -4,18 +4,23 @@ from __future__ import annotations
 
 import uuid
 from io import BytesIO
-from datetime import timedelta
+import logging
+from datetime import datetime, timedelta
 from typing import Annotated, Union
 
 import qrcode
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database.session import get_db
-from app.models import UserAccount
+from app.models import Person, UserAccount
 from app.rate_limit import RateLimiter
-from app.providers.walk_up_email import WalkUpEmailError, send_walk_up_code_email
+from app.providers.walk_up_email import (
+    WalkUpEmailError,
+    send_walk_up_code_email,
+    send_walk_up_pass_email,
+)
 from app.schemas.walk_up import (
     GateAdmitRequest,
     GateExitRequest,
@@ -47,6 +52,7 @@ from app.services.walk_up import (
     verify_email_code,
     lookup_for_gate,
     pass_qr_data_url,
+    pass_qr_png,
     list_registrations,
     reference_for,
     register_walk_up,
@@ -56,6 +62,7 @@ from app.services.walk_up import (
 from app.services.workflows import WorkflowError
 
 router = APIRouter(prefix="/api/walk-up", tags=["Walk-up registration"])
+_LOGGER = logging.getLogger(__name__)
 
 # Many contractors can share one guest Wi-Fi address, so the limit is generous.
 _registration_limiter = RateLimiter(limit=30, window_seconds=600)
@@ -66,6 +73,33 @@ def email_check_enabled() -> bool:
     """Whether walk-up people must enter an emailed code before they are registered."""
 
     return get_settings().walk_up_email_check.strip().lower() != "off"
+
+
+def _email_entry_qr(
+    settings: object,
+    *,
+    to: str,
+    first_name: str,
+    site_name: str,
+    reference: str,
+    valid_until: datetime,
+    qr_png: bytes,
+) -> None:
+    """Send the entry QR after the response. A failure never undoes the registration."""
+
+    try:
+        send_walk_up_pass_email(
+            settings,
+            to=to,
+            first_name=first_name,
+            site_name=site_name,
+            reference=reference,
+            valid_until=valid_until,
+            qr_png=qr_png,
+        )
+        _LOGGER.info("Walk-up entry QR emailed for registration %s.", reference)
+    except WalkUpEmailError:
+        _LOGGER.warning("Walk-up entry QR email could not be sent for registration %s.", reference)
 
 
 def _client_key(request: Request) -> str:
@@ -279,9 +313,10 @@ def post_walk_up_verify(
     payload: WalkUpVerifyRequest,
     request: Request,
     response: Response,
+    background: BackgroundTasks,
     database: Annotated[Session, Depends(get_db)],
 ) -> WalkUpRegistrationReceipt:
-    """Finish a registration with its email code."""
+    """Finish a registration with its email code, then email the entry QR."""
 
     response.headers["Cache-Control"] = "no-store"
     if not _verify_limiter.allow(_client_key(request)):
@@ -290,16 +325,29 @@ def post_walk_up_verify(
         registration, site, rules, acknowledgement, pass_secret = verify_email_code(
             database, pending_id=payload.pending_id, code=payload.code
         )
+        reference = reference_for(registration.id)
+        person = database.get(Person, registration.person_id)
         receipt = WalkUpRegistrationReceipt(
-            reference=reference_for(registration.id),
+            reference=reference,
             site_name=site.name,
             registered_at=registration.registered_at,
             rules_version=rules.version,
             language=acknowledgement.language,
-            pass_qr=pass_qr_data_url(pass_secret, reference_for(registration.id)),
+            pass_qr=pass_qr_data_url(pass_secret, reference),
             pass_valid_until=registration.pass_expires_at,
+            emailed_to=email_hint(person.email),
+        )
+        email_job = dict(
+            to=person.email,
+            first_name=person.first_name,
+            site_name=site.name,
+            reference=reference,
+            valid_until=registration.pass_expires_at,
+            qr_png=pass_qr_png(pass_secret, reference),
         )
         database.commit()
+        # The address was just proven with a code. Send the QR after the response is returned.
+        background.add_task(_email_entry_qr, get_settings(), **email_job)
         return receipt
     except WorkflowError as error:
         database.rollback()

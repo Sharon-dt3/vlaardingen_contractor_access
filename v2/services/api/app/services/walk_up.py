@@ -86,11 +86,10 @@ def _hash_pass(secret: str) -> str:
     return hashlib.sha256(secret.encode("utf-8")).hexdigest()
 
 
-def pass_qr_data_url(pass_secret: str, reference: str) -> str:
-    """The QR the person shows at the kiosk, as an image the page can display.
+def pass_qr_png(pass_secret: str, reference: str) -> bytes:
+    """The entry QR as PNG bytes: ``renewi-walkup:<reference>:<secret>``.
 
-    It carries the short reference (not secret, so the kiosk can show it at once) and the
-    secret, as ``renewi-walkup:<reference>:<secret>``.
+    The reference is not secret, so the kiosk can show it at once; the secret decides.
     """
 
     image = qrcode.make(
@@ -100,7 +99,13 @@ def pass_qr_data_url(pass_secret: str, reference: str) -> str:
     )
     output = BytesIO()
     image.save(output, format="PNG")
-    return "data:image/png;base64," + base64.b64encode(output.getvalue()).decode("ascii")
+    return output.getvalue()
+
+
+def pass_qr_data_url(pass_secret: str, reference: str) -> str:
+    """The same QR as an image the registration page can display."""
+
+    return "data:image/png;base64," + base64.b64encode(pass_qr_png(pass_secret, reference)).decode("ascii")
 
 
 def site_for_key(database: Session, key: str) -> Site:

@@ -75,6 +75,8 @@ class WalkUpRegistrationReceipt(BaseModel):
     language: str
     pass_qr: str
     pass_valid_until: datetime
+    # Set when a copy of the entry QR is being emailed to the verified address.
+    emailed_to: str | None = None
 
 
 class WalkUpRegistrationRow(BaseModel):
