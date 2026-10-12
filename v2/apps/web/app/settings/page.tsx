@@ -27,10 +27,9 @@ function SettingsContent() {
   return (
     <div className="space-y-7">
       <PageHeader
-        badge={<StatusBadge tone="demo">Local only</StatusBadge>}
-        description="This surface reports non-secret runtime context. Authorization, cookie signing, and provider configuration remain owned by the API."
+        description="Set how long access lasts at each site and review your account's access."
         eyebrow="Administration"
-        title="Demo settings"
+        title="Settings"
       />
       <div className="grid gap-4 md:grid-cols-3">
         <article className="surface p-5">
