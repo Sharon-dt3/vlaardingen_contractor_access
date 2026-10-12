@@ -302,10 +302,13 @@ export type AccessToken = {
   revoked_by_id: string | null;
   revoked_at: string | null;
   revoke_reason: string | null;
+  valid_from?: string | null;
 };
 
 export type TokenIssueResponse = {
   token: AccessToken;
+  valid_from?: string | null;
+  site_timezone?: string;
   qr_payload: string;
   delivery_status: "smtp_sent" | "smtp_failed" | "local_only" | "unavailable";
 };
@@ -393,6 +396,10 @@ export type CurrentPresence = {
   source?: string;
   walk_up_registration_id?: string | null;
   site_key?: string | null;
+  /** When they should have left: the earlier of the visit end and their QR's exit time. */
+  exit_due_at?: string | null;
+  overdue?: boolean;
+  overdue_minutes?: number | null;
 };
 
 export type PresenceEvent = {
@@ -405,6 +412,18 @@ export type PresenceEvent = {
   occurred_at: string;
 };
 
+export type DashboardPathCounts = {
+  present_count: number;
+  entry_count: number;
+  exit_count: number;
+  overdue_count?: number;
+};
+
+export type DashboardByPath = {
+  planned: DashboardPathCounts;
+  walk_up: DashboardPathCounts;
+};
+
 export type DashboardTotals = {
   site_count: number;
   active_visit_count: number;
@@ -413,6 +432,8 @@ export type DashboardTotals = {
   denial_count: number;
   entry_count: number;
   exit_count: number;
+  overdue_count?: number;
+  by_path?: DashboardByPath | null;
 };
 
 export type DashboardSite = {
@@ -425,6 +446,8 @@ export type DashboardSite = {
   denial_count: number;
   entry_count: number;
   exit_count: number;
+  overdue_count?: number;
+  by_path?: DashboardByPath | null;
 };
 
 export type DashboardDecision = {
@@ -598,6 +621,27 @@ export function lifeSavingBadge(state: LifeSavingRulesState): { label: string; t
   if (state === "confirmed") return { label: "Confirmed", tone: "success" };
   if (state === "outdated") return { label: "New version to confirm", tone: "warning" };
   return { label: "Not confirmed", tone: "danger" };
+}
+
+/**
+ * Formats a moment in the site's own time zone, with the zone named, so an officer, the
+ * person and the email all show the same clock time.
+ */
+export function formatInSiteZone(value: string, timeZone: string | undefined): string {
+  try {
+    // dateStyle and timeZoneName cannot be combined, so the parts are listed explicitly.
+    return new Intl.DateTimeFormat(undefined, {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: timeZone || "UTC",
+      timeZoneName: "short"
+    }).format(new Date(value));
+  } catch {
+    return formatDateTime(value);
+  }
 }
 
 export function formatDateTime(value: string): string {

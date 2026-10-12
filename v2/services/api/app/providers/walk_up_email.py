@@ -6,6 +6,7 @@ import smtplib
 from datetime import datetime
 from email.message import EmailMessage
 
+from app.providers.time_format import entry_exit_lines
 from app.config import Settings
 
 
@@ -63,6 +64,8 @@ def send_walk_up_pass_email(
     reference: str,
     valid_until: datetime,
     qr_png: bytes,
+    valid_from: datetime | None = None,
+    timezone_name: str = "UTC",
 ) -> None:
     """Email the person their entry QR, so it is not lost if they close the page.
 
@@ -73,6 +76,8 @@ def send_walk_up_pass_email(
         site_name: The site they registered at.
         reference: The short code that stands in for the QR.
         valid_until: When the entry QR stops working.
+        valid_from: When entry opens (the moment they registered).
+        timezone_name: The site's time zone, used to show both times.
         qr_png: The QR image, attached as a PNG.
     Raises:
         WalkUpEmailError: If SMTP handoff fails.
@@ -88,7 +93,7 @@ def send_walk_up_pass_email(
         f"You are registered at {site_name}. Show the attached QR code to the gate officer "
         "when you arrive, or read out your reference.\n\n"
         f"    Reference: {reference}\n"
-        f"    Valid until: {valid_until.strftime('%Y-%m-%d %H:%M UTC')}\n\n"
+        f"{entry_exit_lines(valid_from, valid_until, timezone_name)}\n"
         "Keep this email private: anyone who has the QR can use it until it expires.\n"
     )
     message.add_attachment(

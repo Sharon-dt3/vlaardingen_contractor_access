@@ -765,6 +765,7 @@ def issue_access_token(
     actor: UserAccount,
     visit_id: uuid.UUID,
     requested_expiry: datetime | None,
+    requested_start: datetime | None = None,
 ) -> tuple[AccessToken, str]:
     """Issue one opaque token only after current compliance and approval pass."""
 
@@ -792,6 +793,15 @@ def issue_access_token(
         raise WorkflowError(409, "Token expiry must be in the future.")
     if expires_at > visit.ends_at:
         raise WorkflowError(422, "Token expiry must not exceed the visit end time.")
+    valid_from = visit.starts_at
+    if requested_start is not None:
+        if requested_start.tzinfo is None:
+            raise WorkflowError(422, "Token entry time must include timezone information.")
+        if requested_start < visit.starts_at:
+            raise WorkflowError(422, "Token entry time must not be before the visit start time.")
+        if requested_start >= expires_at:
+            raise WorkflowError(422, "Token entry time must be before its exit time.")
+        valid_from = requested_start
 
     active_token = database.scalar(
         select(AccessToken).where(
@@ -814,6 +824,7 @@ def issue_access_token(
         issued_by_id=actor.id,
         issued_at=issued_at,
         expires_at=expires_at,
+        valid_from=valid_from,
         revoked_by_id=None,
         revoked_at=None,
         revoke_reason=None,
@@ -829,6 +840,7 @@ def issue_access_token(
         reason="Issued an opaque access token for an approved eligible visit.",
         details={
             "visit_id": str(visit_id),
+            "valid_from": valid_from.isoformat(),
             "expires_at": expires_at.isoformat(),
             "reference_hash_prefix": token.reference_hash[:12],
             "synthetic": True,

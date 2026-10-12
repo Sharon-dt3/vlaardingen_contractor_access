@@ -68,11 +68,17 @@ def get_current_presence(
         Deterministically ordered current-presence records.
     """
 
-    from app.services.walk_up import walk_up_presence_rows
+    from app.services.batch6 import get_effective_time
+    from app.services.walk_up import mark_planned_presence, walk_up_presence_rows
 
-    rows = list_current_presence(database, site_id=site_id) + walk_up_presence_rows(
-        database, site_id=site_id
+    # Invited people past their exit time stay listed, flagged as overdue.
+    planned, _ended = mark_planned_presence(
+        database,
+        list_current_presence(database, site_id=site_id),
+        as_of=get_effective_time(database),
+        site_id=site_id,
     )
+    rows = planned + walk_up_presence_rows(database, site_id=site_id)
     rows.sort(key=lambda row: (row["site_name"], row["person_name"]))
     return [CurrentPresenceResponse.model_validate(row) for row in rows]
 

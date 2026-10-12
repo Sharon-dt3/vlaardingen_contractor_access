@@ -97,6 +97,30 @@ class CurrentPresenceResponse(BaseModel):
     site_key: str | None = Field(
         default=None, description="Short site key used to record a walk-up exit."
     )
+    exit_due_at: datetime | None = Field(
+        default=None,
+        description="When this person should have left: the earlier of the visit end and their QR's exit time.",
+    )
+    overdue: bool = Field(default=False, description="Still on site after the exit time.")
+    overdue_minutes: int | None = Field(default=None, description="How long past the exit time, in minutes.")
+
+
+# PUBLIC_INTERFACE
+class DashboardPathCounts(BaseModel):
+    """People on site, entered and exited for one way of arriving."""
+
+    present_count: int = Field(..., ge=0)
+    entry_count: int = Field(..., ge=0)
+    exit_count: int = Field(..., ge=0)
+    overdue_count: int = Field(default=0, ge=0, description="Still on site after their exit time.")
+
+
+# PUBLIC_INTERFACE
+class DashboardByPath(BaseModel):
+    """The same counts split into planned (invited) and unexpected (walk-up) arrivals."""
+
+    planned: DashboardPathCounts
+    walk_up: DashboardPathCounts
 
 
 # PUBLIC_INTERFACE
@@ -110,6 +134,8 @@ class DashboardTotalsResponse(BaseModel):
     denial_count: int = Field(..., ge=0)
     entry_count: int = Field(..., ge=0)
     exit_count: int = Field(..., ge=0)
+    overdue_count: int = Field(default=0, ge=0, description="Still on site after their exit time.")
+    by_path: DashboardByPath | None = None
 
 
 # PUBLIC_INTERFACE
@@ -125,6 +151,8 @@ class DashboardSiteResponse(BaseModel):
     denial_count: int = Field(..., ge=0)
     entry_count: int = Field(..., ge=0)
     exit_count: int = Field(..., ge=0)
+    overdue_count: int = Field(default=0, ge=0, description="Still on site after their exit time.")
+    by_path: DashboardByPath | None = None
 
 
 # PUBLIC_INTERFACE

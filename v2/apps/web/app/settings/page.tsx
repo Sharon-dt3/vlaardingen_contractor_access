@@ -3,6 +3,7 @@
 import { KeyRound, Server, ShieldCheck } from "lucide-react";
 import { PermissionBoundary } from "@/components/auth/permission-boundary";
 import { useAuth } from "@/components/auth/auth-provider";
+import { SiteAccessSettings } from "@/components/settings/site-access-settings";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { getApiBaseUrl } from "@/lib/api-client";
@@ -56,6 +57,7 @@ function SettingsContent() {
           </p>
         </article>
       </div>
+      <SiteAccessSettings />
       <section className="surface p-5">
         <h2 className="text-base font-semibold text-slate-950">
           Effective permissions

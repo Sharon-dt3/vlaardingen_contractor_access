@@ -227,7 +227,9 @@ def test_token_issuance_records_live_time_but_validates_expiry_at_demo_time(
 
     live_at = datetime(2026, 9, 29, 12, tzinfo=UTC)
     demo_at = live_at + timedelta(days=3)
-    visit = SimpleNamespace(id="visit-1", ends_at=demo_at + timedelta(hours=2))
+    visit = SimpleNamespace(
+        id="visit-1", starts_at=demo_at - timedelta(hours=1), ends_at=demo_at + timedelta(hours=2)
+    )
     actor = SimpleNamespace(id="manager-1")
 
     class _TokenSession:

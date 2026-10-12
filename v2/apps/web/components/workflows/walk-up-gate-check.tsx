@@ -4,9 +4,22 @@ import { useQuery } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ApiError, apiRequest } from "@/lib/api-client";
-import { enumLabel, formatDateTime } from "@/lib/domain";
+import { enumLabel, formatDateTime, formatInSiteZone } from "@/lib/domain";
 import { GateQrScanner } from "@/components/workflows/gate-qr-scanner";
 import { WalkUpCameraScanner } from "@/components/workflows/walk-up-camera-scanner";
+
+// "opens in 25 min", "2 h 15 min left" or "expired", from the QR's own entry and exit time.
+function qrTimeLeft(validFrom: string, validUntil: string): string {
+  const now = Date.now();
+  const describe = (ms: number) => {
+    const minutes = Math.max(1, Math.round(ms / 60000));
+    const hours = Math.floor(minutes / 60);
+    return hours > 0 ? `${hours} h ${minutes % 60} min` : `${minutes} min`;
+  };
+  if (new Date(validUntil).getTime() <= now) return "expired";
+  if (new Date(validFrom).getTime() > now) return `opens in ${describe(new Date(validFrom).getTime() - now)}`;
+  return `${describe(new Date(validUntil).getTime() - now)} left`;
+}
 
 type SiteLink = { site_key: string; site_name: string };
 
@@ -19,6 +32,9 @@ type Arrival = {
   population: string;
   site_name: string;
   registered_at: string;
+  pass_valid_from: string;
+  pass_valid_until: string;
+  site_timezone: string;
   rules_version: number | null;
   rules_language: string | null;
   eligible: boolean;
@@ -287,6 +303,16 @@ export function WalkUpGateCheck() {
               <StatusBadge tone="danger">Do not admit</StatusBadge>
             )}
           </div>
+
+          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm text-slate-900">
+            <dt className="font-semibold">Entry from</dt>
+            <dd>{formatInSiteZone(arrival.pass_valid_from, arrival.site_timezone)}</dd>
+            <dt className="font-semibold">Exit by</dt>
+            <dd>
+              {formatInSiteZone(arrival.pass_valid_until, arrival.site_timezone)} ·{" "}
+              <strong>{qrTimeLeft(arrival.pass_valid_from, arrival.pass_valid_until)}</strong>
+            </dd>
+          </dl>
 
           <p className="text-sm font-semibold text-slate-900">
             {arrival.reasons.some((reason) => reason.code.startsWith("LIFE_SAVING"))

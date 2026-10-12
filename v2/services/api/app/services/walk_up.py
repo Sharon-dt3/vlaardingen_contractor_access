@@ -19,6 +19,8 @@ from io import BytesIO
 from typing import Any
 
 import qrcode
+from zoneinfo import ZoneInfo
+
 from sqlalchemy import String, cast, delete, func, select
 from sqlalchemy.orm import Session
 
@@ -39,12 +41,13 @@ from app.models import (
 from app.services.audit import append_audit_event
 from app.services.batch3 import _is_blacklisted
 from app.services.life_saving import content_sha256, pick_translation, status_for_people
+from app.services.site_settings import get_site_settings
 from app.services.workflows import WorkflowError
 
 CONFIRMATION_METHOD_WALK_UP = "walk_up_qr"
 PERSON_SOURCE = "walk_up_qr"
 # How long a registration can be presented at the kiosk. A new day needs a new registration.
-PASS_VALID_HOURS = 12
+PASS_VALID_HOURS = 12  # fallback for a registration that has no stored expiry
 PASS_PREFIX = "renewi-walkup:"
 # The email check: a six-digit code, valid for a few minutes, with limited tries and resends.
 CODE_VALID_MINUTES = 10
@@ -63,11 +66,17 @@ OFFICER_REFUSAL_REASONS = {
     "other": "Another reason, written in the note.",
 }
 # Someone still listed on site after this long is flagged for the officer to check.
-STALE_ON_SITE_HOURS = 24
 
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _pass_expired(registration: WalkUpRegistration) -> bool:
+    """True once the QR's own expiry has passed (12 hours after registering if none is stored)."""
+
+    expires = registration.pass_expires_at or registration.registered_at + timedelta(hours=PASS_VALID_HOURS)
+    return expires < _now()
 
 
 def site_key(site: Site) -> str:
@@ -289,6 +298,9 @@ def register_walk_up(
         )
 
     pass_secret = secrets.token_urlsafe(24)
+    # The site decides when the QR starts working and how long it lasts.
+    settings = get_site_settings(database, site)
+    pass_opens_at = now + timedelta(minutes=settings.walk_up_entry_delay_minutes)
     registration = WalkUpRegistration(
         id=uuid.uuid4(),
         site_id=site.id,
@@ -297,7 +309,8 @@ def register_walk_up(
         registered_at=now,
         source="qr",
         pass_hash=_hash_pass(pass_secret),
-        pass_expires_at=now + timedelta(hours=PASS_VALID_HOURS),
+        pass_valid_from=pass_opens_at,
+        pass_expires_at=pass_opens_at + timedelta(hours=settings.walk_up_pass_hours),
         email_verified_at=email_verified_at,
     )
     database.add(registration)
@@ -403,9 +416,16 @@ def _find_registration(
         # Current QR codes read "<reference>:<secret>"; earlier ones hold the secret alone.
         if ":" in cleaned:
             cleaned = cleaned.split(":", 1)[1]
-    cutoff = _now() - timedelta(hours=PASS_VALID_HOURS)
+    now = _now()
+    # Each QR keeps the expiry it was issued with, so changing the setting never
+    # shortens or extends one that is already out. Older rows without one get 12 hours.
     query = select(WalkUpRegistration).where(
-        WalkUpRegistration.site_id == site.id, WalkUpRegistration.registered_at >= cutoff
+        WalkUpRegistration.site_id == site.id,
+        func.coalesce(
+            WalkUpRegistration.pass_expires_at,
+            WalkUpRegistration.registered_at + timedelta(hours=PASS_VALID_HOURS),
+        )
+        >= now,
     )
     if re.fullmatch(r"[0-9A-Fa-f]{8}", cleaned):
         matches = list(
@@ -454,6 +474,16 @@ def _entry_state(database: Session, registration: WalkUpRegistration) -> dict[st
         reasons.append({"code": "PERSON_NOT_ACTIVE", "message": "This person is not allowed on site."})
     if _is_blacklisted(database, person=person, evaluated_at=now):
         reasons.append({"code": "BLACKLISTED", "message": "This person or their company is blacklisted."})
+    opens_at = registration.pass_valid_from or registration.registered_at
+    if opens_at > now and registration.admitted_at is None:
+        reasons.append(
+            {
+                "code": "PASS_NOT_YET_VALID",
+                "message": "Their QR is not valid yet. Entry opens at "
+                + opens_at.astimezone(ZoneInfo(site.timezone)).strftime("%H:%M")
+                + f" ({site.timezone}).",
+            }
+        )
     if registration.exited_at is not None:
         reasons.append(
             {
@@ -475,6 +505,10 @@ def _entry_state(database: Session, registration: WalkUpRegistration) -> dict[st
         "population": person.population.value,
         "site_name": site.name,
         "registered_at": registration.registered_at,
+        "pass_valid_from": opens_at,
+        "pass_valid_until": registration.pass_expires_at
+        or registration.registered_at + timedelta(hours=PASS_VALID_HOURS),
+        "site_timezone": site.timezone,
         "rules_version": summary["confirmed_rules_version"],
         "rules_language": summary["language"],
         "eligible": not reasons,
@@ -702,7 +736,7 @@ def admit_at_gate(
         .where(WalkUpRegistration.id == registration_id, WalkUpRegistration.site_id == site.id)
         .with_for_update()
     )
-    if registration is None or registration.registered_at < _now() - timedelta(hours=PASS_VALID_HOURS):
+    if registration is None or _pass_expired(registration):
         raise WorkflowError(404, "No recent registration found. The person can register again.")
     if registration.exited_at is not None:
         # Recorded and committed here, because the caller rolls back when this raises.
@@ -955,7 +989,7 @@ def list_on_site(database: Session, *, site_id: uuid.UUID | None = None) -> list
     )
     if site_id is not None:
         query = query.where(WalkUpRegistration.site_id == site_id)
-    stale_before = _now() - timedelta(hours=STALE_ON_SITE_HOURS)
+    now = _now()
     rows = []
     for registration, person, company, site in database.execute(query).all():
         operator = (
@@ -974,7 +1008,17 @@ def list_on_site(database: Session, *, site_id: uuid.UUID | None = None) -> list
                 "site_key": site_key(site),
                 "admitted_at": registration.admitted_at,
                 "admitted_by": operator.display_name if operator else None,
-                "stale": registration.admitted_at < stale_before,
+                # They stay listed however long they are inside; past their QR's exit time they are overdue.
+                "exit_due_at": (
+                    registration.pass_expires_at
+                    or registration.registered_at + timedelta(hours=PASS_VALID_HOURS)
+                ),
+                "overdue": _pass_expired(registration),
+                "overdue_minutes": (
+                    int((now - (registration.pass_expires_at or registration.registered_at + timedelta(hours=PASS_VALID_HOURS))).total_seconds() // 60)
+                    if _pass_expired(registration)
+                    else None
+                ),
             }
         )
     return rows
@@ -1012,6 +1056,9 @@ def walk_up_presence_rows(database: Session, *, site_id: uuid.UUID | None = None
                 "decision": GateDecision.GRANT.value,
                 "walk_up_registration_id": row["registration_id"],
                 "source": "walk_up",
+                "exit_due_at": row["exit_due_at"],
+                "overdue": row["overdue"],
+                "overdue_minutes": row["overdue_minutes"],
             }
         )
     return rows
@@ -1109,6 +1156,63 @@ def walk_up_dashboard_activity(
     return {"counts": counts, "decisions": decisions}
 
 
+def _mark_exit_due(row: dict[str, Any], due: datetime | None, now: datetime) -> None:
+    """Record when someone should have left and whether they are past it."""
+
+    row["exit_due_at"] = due
+    overdue = due is not None and due < now
+    row["overdue"] = overdue
+    row["overdue_minutes"] = int((now - due).total_seconds() // 60) if overdue else None
+
+
+def _planned_exit_due(database: Session, rows: list[dict[str, Any]]) -> dict[uuid.UUID, datetime]:
+    """For invited people, the exit time is the earlier of the visit end and their QR's exit time."""
+
+    from app.models import AccessToken, AccessTokenStatus
+
+    visit_ids = [row["visit_id"] for row in rows if row.get("visit_id")]
+    token_exit: dict[uuid.UUID, datetime] = {}
+    if visit_ids:
+        for visit_id, expires_at in database.execute(
+            select(AccessToken.visit_id, AccessToken.expires_at)
+            .where(AccessToken.visit_id.in_(visit_ids), AccessToken.status != AccessTokenStatus.REVOKED)
+            .order_by(AccessToken.issued_at.desc())
+        ):
+            token_exit.setdefault(visit_id, expires_at)
+    return token_exit
+
+
+# PUBLIC_INTERFACE
+def mark_planned_presence(
+    database: Session,
+    planned: list[dict[str, Any]],
+    *,
+    as_of: datetime,
+    site_id: uuid.UUID | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Give each invited person on site an exit time and an overdue flag.
+
+    Returns every invited person on site, and separately the ones whose visit has
+    already ended without an exit being recorded (the invitation projection drops them).
+    """
+
+    from app.services.batch5 import _current_presence_rows
+
+    ended = _current_presence_rows(database, observed_at=as_of, ended_only=True, site_id=site_id)
+    token_exit = _planned_exit_due(database, planned + ended)
+    for row in planned + ended:
+        due = row.get("visit_ends_at")
+        token_due = token_exit.get(row.get("visit_id"))
+        if token_due is not None and (due is None or token_due < due):
+            due = token_due
+        _mark_exit_due(row, due, as_of)
+    for row in ended:
+        row["overdue"] = True
+        if row["overdue_minutes"] is None:
+            row["overdue_minutes"] = 0
+    return planned + ended, ended
+
+
 # PUBLIC_INTERFACE
 def merge_walk_ups_into_dashboard(
     database: Session, snapshot: dict[str, Any], *, recent_limit: int
@@ -1119,6 +1223,11 @@ def merge_walk_ups_into_dashboard(
     roster and the recent decisions then cover both invited and walk-up people.
     "Active visits" is unchanged, because a walk-up person has no visit. The invitation
     dashboard code itself is not touched: this runs on its finished result.
+
+    It also finds the people who are still inside after they should have left: an
+    invited person whose visit ended without an exit being recorded (the invitation
+    projection drops them), and anyone, invited or walk-up, past their QR's exit time.
+    They stay on the roster flagged as overdue and are counted in "Currently present".
     """
 
     rows = walk_up_presence_rows(database)
@@ -1129,11 +1238,51 @@ def merge_walk_ups_into_dashboard(
     )
     by_site = {site["site_id"]: site for site in snapshot["sites"]}
     totals = snapshot["totals"]
+    as_of = snapshot["as_of"]
+
+    planned_rows, ended = mark_planned_presence(
+        database, list(snapshot["current_presence"]), as_of=as_of
+    )
+
+    # Before anything is added these are the planned (invited) counts.
+    for target in [totals, *snapshot["sites"]]:
+        target["overdue_count"] = 0
+        target["by_path"] = {
+            "planned": {
+                "present_count": target["present_count"],
+                "entry_count": target["entry_count"],
+                "exit_count": target["exit_count"],
+                "overdue_count": 0,
+            },
+            "walk_up": {"present_count": 0, "entry_count": 0, "exit_count": 0, "overdue_count": 0},
+        }
+
+    def count(row: dict[str, Any], path: str) -> None:
+        site = by_site.get(row["site_id"])
+        if site is None:
+            return
+        for target in (site, totals):
+            if row["overdue"]:
+                target["overdue_count"] += 1
+                target["by_path"][path]["overdue_count"] += 1
+
+    for row in ended:
+        # Not in the invitation projection, so they are added to the present counts here.
+        site = by_site.get(row["site_id"])
+        if site is not None:
+            for target in (site, totals):
+                target["present_count"] += 1
+                target["by_path"]["planned"]["present_count"] += 1
+    for row in planned_rows:
+        count(row, "planned")
     for row in rows:
         site = by_site.get(row["site_id"])
         if site is not None:
             site["present_count"] += 1
             totals["present_count"] += 1
+            site["by_path"]["walk_up"]["present_count"] += 1
+            totals["by_path"]["walk_up"]["present_count"] += 1
+            count(row, "walk_up")
     for site_id_value, counts in activity["counts"].items():
         site = by_site.get(site_id_value)
         if site is None:
@@ -1146,8 +1295,12 @@ def merge_walk_ups_into_dashboard(
         ):
             site[site_key_name] += counts[count_key]
             totals[total_key] += counts[count_key]
+            if count_key in ("entries", "exits"):
+                path_key = "entry_count" if count_key == "entries" else "exit_count"
+                site["by_path"]["walk_up"][path_key] += counts[count_key]
+                totals["by_path"]["walk_up"][path_key] += counts[count_key]
     snapshot["current_presence"] = sorted(
-        list(snapshot["current_presence"]) + rows,
+        planned_rows + rows,
         key=lambda row: (row["site_name"], row["person_name"]),
     )
     snapshot["recent_decisions"] = sorted(

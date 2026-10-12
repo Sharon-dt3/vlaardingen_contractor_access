@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -46,6 +47,8 @@ from app.services import (
     submit_training_attempt,
 )
 from app.services.batch3 import submit_training_completion
+from app.services.batch6 import current_demo_time
+from app.services.site_settings import access_qr_window
 
 router = APIRouter(prefix="/api", tags=["Training, compliance, approvals, and tokens"])
 
@@ -399,11 +402,23 @@ def post_visit_token(
     """
 
     try:
+        window_start, window_expiry = payload.valid_from, payload.expires_at
+        visit_for_window = database.get(Visit, visit_id)
+        if visit_for_window is not None:
+            # The site's longest-QR rule applies before anything is issued.
+            window_start, window_expiry = access_qr_window(
+                database,
+                visit=visit_for_window,
+                requested_start=payload.valid_from,
+                requested_expiry=payload.expires_at,
+                now=current_demo_time(database) or datetime.now(timezone.utc),
+            )
         token, qr_payload = issue_access_token(
             database,
             actor=actor,
             visit_id=visit_id,
-            requested_expiry=payload.expires_at,
+            requested_expiry=window_expiry,
+            requested_start=window_start,
         )
         visit = database.get(Visit, visit_id)
         invitation = database.scalar(
@@ -422,13 +437,16 @@ def post_visit_token(
         database.rollback()
         _raise_api_error(error)
 
+    site_timezone = (database.get(Site, visit.site_id).timezone) if visit is not None else "UTC"
     delivery_status = "unavailable"
     if invitation is not None and site is not None:
         settings = get_settings()
         settings.prepare_local_runtime()
         if settings.notification_provider == "smtp":
             try:
-                send_access_token_email(settings, invitation, site, token, qr_payload)
+                send_access_token_email(
+                    settings, invitation, site, token, qr_payload, valid_from=token.valid_from or visit.starts_at
+                )
             except InvitationEmailError:
                 delivery_status = "smtp_failed"
             else:
@@ -437,6 +455,8 @@ def post_visit_token(
             delivery_status = "local_only"
     return TokenIssueResponse(
         token=AccessTokenResponse.model_validate(token),
+        valid_from=token.valid_from or visit.starts_at,
+        site_timezone=site_timezone,
         qr_payload=qr_payload,
         delivery_status=delivery_status,
     )

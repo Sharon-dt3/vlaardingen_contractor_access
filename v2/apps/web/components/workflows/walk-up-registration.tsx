@@ -1,5 +1,6 @@
 "use client";
 
+import { formatInSiteZone } from "@/lib/domain";
 import { type FormEvent, useEffect, useId, useState } from "react";
 import { ApiError, apiRequest } from "@/lib/api-client";
 
@@ -24,7 +25,9 @@ type Receipt = {
   rules_version: number;
   language: string;
   pass_qr: string;
+  pass_valid_from?: string | null;
   pass_valid_until: string;
+  site_timezone?: string;
   emailed_to?: string | null;
 };
 
@@ -276,9 +279,14 @@ export function WalkUpRegistration({ siteKey }: { siteKey: string }) {
             <p className="mt-1 font-mono text-3xl font-bold tracking-widest text-slate-950">
               {receipt.reference}
             </p>
+            <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-left text-sm text-slate-800">
+              <dt className="font-semibold">Entry from</dt>
+              <dd>{formatInSiteZone(receipt.pass_valid_from ?? receipt.registered_at, receipt.site_timezone)}</dd>
+              <dt className="font-semibold">Exit by</dt>
+              <dd>{formatInSiteZone(receipt.pass_valid_until, receipt.site_timezone)}</dd>
+            </dl>
             <p className="mt-2 text-xs text-slate-600">
-              Registered {new Date(receipt.registered_at).toLocaleString()}. Valid until{" "}
-              {new Date(receipt.pass_valid_until).toLocaleString()}.
+              The QR stops working at the exit time. Times are shown in the site&apos;s time zone.
             </p>
           </div>
           {receipt.emailed_to ? (

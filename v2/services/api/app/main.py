@@ -15,6 +15,7 @@ from app.routes.audit import router as audit_router
 from app.routes.auth import router as auth_router
 from app.routes.health import router as health_router
 from app.routes.life_saving import router as life_saving_router
+from app.routes.site_settings import router as site_settings_router
 from app.routes.walk_up import router as walk_up_router
 from app.routes.records import router as records_router
 from app.routes.batch3 import router as batch3_router
@@ -143,6 +144,7 @@ def create_app() -> FastAPI:
     application.include_router(batch6_router)
     application.include_router(life_saving_router)
     application.include_router(walk_up_router)
+    application.include_router(site_settings_router)
     return application
 
 

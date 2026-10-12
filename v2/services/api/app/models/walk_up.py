@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -47,6 +47,10 @@ class WalkUpRegistration(Base):
     # The pass is the QR the person shows at the kiosk. Only its hash is stored.
     pass_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
     pass_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # When the QR starts working. Empty on older rows: they work from registration.
+    pass_valid_from: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     # Set when a gate operator lets the person in, and by whom.
@@ -97,3 +101,38 @@ class WalkUpPending(Base):
     sends: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     last_sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+# PUBLIC_INTERFACE
+class SiteAccessSettings(Base):
+    """How long access lasts at a site, set by an administrator.
+
+    ``visit_default_hours`` pre-fills the end of a new invitation (Path A) and
+    ``walk_up_pass_hours`` is how long a new walk-up entry QR stays valid (Path B).
+    Changing a value affects new invitations and new QR codes only; QR codes that
+    were already issued keep the expiry they were given.
+    """
+
+    __tablename__ = "site_access_settings"
+    __table_args__ = (
+        CheckConstraint("visit_default_hours BETWEEN 1 AND 168", name="ck_site_settings_visit"),
+        CheckConstraint("walk_up_pass_hours BETWEEN 1 AND 72", name="ck_site_settings_pass"),
+        CheckConstraint("access_qr_max_hours BETWEEN 1 AND 168", name="ck_site_settings_qr_max"),
+        CheckConstraint(
+            "walk_up_entry_delay_minutes BETWEEN 0 AND 240", name="ck_site_settings_delay"
+        ),
+    )
+
+    site_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("sites.id", ondelete="CASCADE"), primary_key=True
+    )
+    visit_default_hours: Mapped[int] = mapped_column(Integer, nullable=False, default=8)
+    walk_up_pass_hours: Mapped[int] = mapped_column(Integer, nullable=False, default=12)
+    # The longest an access QR (Path A) may be valid, whatever the visit window says.
+    access_qr_max_hours: Mapped[int] = mapped_column(Integer, nullable=False, default=24)
+    # A walk-up QR (Path B) starts working this many minutes after registering.
+    walk_up_entry_delay_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user_accounts.id", ondelete="SET NULL"), nullable=True
+    )

@@ -232,6 +232,10 @@ class TokenIssueCommand(BaseModel):
         default=None,
         description="Optional timezone-aware expiry no later than the visit end.",
     )
+    valid_from: datetime | None = Field(
+        default=None,
+        description="Optional timezone-aware entry time, not before the visit start and before the expiry.",
+    )
 
 
 # PUBLIC_INTERFACE
@@ -258,6 +262,7 @@ class AccessTokenResponse(BaseModel):
     issued_by_id: uuid.UUID
     issued_at: datetime
     expires_at: datetime
+    valid_from: datetime | None = None
     revoked_by_id: uuid.UUID | None
     revoked_at: datetime | None
     revoke_reason: str | None
@@ -268,6 +273,10 @@ class TokenIssueResponse(BaseModel):
     """Issued token metadata and one-time opaque QR payload for rendering."""
 
     token: AccessTokenResponse
+    valid_from: datetime | None = Field(
+        default=None, description="When entry opens: the start of the approved visit window."
+    )
+    site_timezone: str = Field(default="UTC", description="The site's time zone for showing the window.")
     qr_payload: str = Field(
         ...,
         description="Opaque non-guessable QR payload containing no personal data.",

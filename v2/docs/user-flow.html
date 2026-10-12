@@ -131,11 +131,14 @@ svg.flow{display:block;width:100%;min-width:1040px;height:auto;font-family:var(-
 <text class="dsc staff" x="100" y="950">confirmation.</text>
 <rect class="card system" x="40" y="994" width="620" height="132" rx="10"/>
 <text class="actor system" x="100" y="1016">THE SYSTEM</text>
+<rect class="pill" x="564" y="1003" width="80" height="20" rx="10"/>
+<text class="pilltx" x="604" y="1013" text-anchor="middle" dominant-baseline="central">New in v2</text>
 <circle class="num system" cx="70" cy="1034" r="14"/>
 <text class="numtx" x="70" y="1034" text-anchor="middle" dominant-baseline="central">6</text>
-<text class="ttl system" x="100" y="1040">Access QR issued</text>
-<text class="dsc system" x="100" y="1064">A QR code is emailed to the person and is valid for the visit window.</text>
-<text class="dsc system" x="100" y="1084">Only a hash of it is stored on the server.</text>
+<text class="ttl system" x="100" y="1040">Access QR issued with entry and exit time</text>
+<text class="dsc system" x="100" y="1064">Staff set when the QR opens and stops, inside the visit window and the</text>
+<text class="dsc system" x="100" y="1084">longest time the site allows. It is emailed with both times, and the</text>
+<text class="dsc system" x="100" y="1104">gate refuses it outside them.</text>
 <path class="arr" d="M350 356 L350 368" fill="none" marker-end="url(#ah)"/>
 <path class="arr" d="M350 510 L350 522" fill="none" marker-end="url(#ah)"/>
 <path class="arr" d="M350 664 L350 676" fill="none" marker-end="url(#ah)"/>
@@ -174,8 +177,9 @@ svg.flow{display:block;width:100%;min-width:1040px;height:auto;font-family:var(-
 <circle class="num system" cx="770" cy="880" r="14"/>
 <text class="numtx" x="770" y="880" text-anchor="middle" dominant-baseline="central">5</text>
 <text class="ttl system" x="800" y="886">Entry QR issued</text>
-<text class="dsc system" x="800" y="910">The person&#x27;s phone shows a QR code and an 8-character reference, valid</text>
-<text class="dsc system" x="800" y="930">for 12 hours. The QR can be downloaded.</text>
+<text class="dsc system" x="800" y="910">The phone shows a QR and an 8-character reference with its entry and</text>
+<text class="dsc system" x="800" y="930">exit time. The site sets when it opens and how long it lasts. A copy is</text>
+<text class="dsc system" x="800" y="950">emailed.</text>
 <path class="arr" d="M1050 356 L1050 368" fill="none" marker-end="url(#ah)"/>
 <path class="arr" d="M1050 510 L1050 522" fill="none" marker-end="url(#ah)"/>
 <path class="arr" d="M1050 664 L1050 676" fill="none" marker-end="url(#ah)"/>
@@ -204,9 +208,9 @@ svg.flow{display:block;width:100%;min-width:1040px;height:auto;font-family:var(-
 <text class="ttl system" x="398" y="1352">Check the records</text>
 <text class="dsc system" x="398" y="1376">Path A: ID verified, approval,</text>
 <text class="dsc system" x="398" y="1396">visit window, blacklist, rules</text>
-<text class="dsc system" x="398" y="1416">confirmed. Path B: rules current,</text>
-<text class="dsc system" x="398" y="1436">not blocked or blacklisted, has not</text>
-<text class="dsc system" x="398" y="1456">already left.</text>
+<text class="dsc system" x="398" y="1416">confirmed. Path B: QR open, rules</text>
+<text class="dsc system" x="398" y="1436">current, not blocked or</text>
+<text class="dsc system" x="398" y="1456">blacklisted, has not already left.</text>
 <rect class="card decision dashed" x="720" y="1306" width="300" height="172" rx="10"/>
 <text class="actor decision" x="738" y="1328">DECISION</text>
 <text class="ttl decision" x="738" y="1352">May the person enter?</text>
@@ -248,10 +252,11 @@ svg.flow{display:block;width:100%;min-width:1040px;height:auto;font-family:var(-
 <rect class="card system" x="40" y="1792" width="300" height="172" rx="10"/>
 <text class="actor system" x="58" y="1814">THE SYSTEM</text>
 <text class="ttl system" x="58" y="1838">Who is on site</text>
-<text class="dsc system" x="58" y="1862">One on-site roster on the Overview</text>
-<text class="dsc system" x="58" y="1882">and the dashboard counts cover both</text>
-<text class="dsc system" x="58" y="1902">paths. Walk-up people are marked as</text>
-<text class="dsc system" x="58" y="1922">walk-up arrivals.</text>
+<text class="dsc system" x="58" y="1862">One live roster covers both paths.</text>
+<text class="dsc system" x="58" y="1882">The dashboard refreshes itself,</text>
+<text class="dsc system" x="58" y="1902">splits planned and unexpected</text>
+<text class="dsc system" x="58" y="1922">arrivals, and flags anyone still</text>
+<text class="dsc system" x="58" y="1942">inside after their exit time.</text>
 <rect class="card officer" x="380" y="1792" width="300" height="172" rx="10"/>
 <text class="actor officer" x="398" y="1814">GATE OFFICER</text>
 <text class="ttl officer" x="398" y="1838">Record exit</text>
@@ -272,15 +277,16 @@ svg.flow{display:block;width:100%;min-width:1040px;height:auto;font-family:var(-
 <text class="ttl system" x="1078" y="1838">Audit trail</text>
 <text class="dsc system" x="1078" y="1862">Every step is recorded with who did</text>
 <text class="dsc system" x="1078" y="1882">it: registration, confirmation,</text>
-<text class="dsc system" x="1078" y="1902">entry, exit and refusals. Staff see</text>
-<text class="dsc system" x="1078" y="1922">it on the People and Audit pages.</text>
+<text class="dsc system" x="1078" y="1902">kiosk checks, entry, exit and</text>
+<text class="dsc system" x="1078" y="1922">refusals. Staff see it on the</text>
+<text class="dsc system" x="1078" y="1942">People and Audit pages.</text>
 <path class="arr" d="M340 1878 L370 1878" fill="none" marker-end="url(#ah)"/>
 </svg>
 </div>
 <p class="hint">On a narrow screen, scroll the diagram sideways.</p>
 <div class="gloss">
 <div><h2>Life-saving rules confirmation</h2><p>A statement the person ticks themselves. The exact wording, rules version and time are stored, and the gate checks it every time.</p></div>
-<div><h2>Access QR and entry QR</h2><p>The access QR comes from an invitation (Path A). The entry QR comes from walk-up registration (Path B). Each is read in its own kiosk panel.</p></div>
+<div><h2>Access QR and entry QR</h2><p>The access QR comes from an invitation (Path A). The entry QR comes from walk-up registration (Path B). Each is read in its own kiosk panel. The entry QR is also emailed after the code check.</p></div>
 <div><h2>Entrance sign</h2><p>One shared QR at the site entrance. It identifies the site and never a person.</p></div>
 <div><h2>Refusals</h2><p>Every refusal is stored in the audit trail with who, when and why, whether the system refused or the officer did. A refusal is a record and does not lock the person out.</p></div>
 <div><h2>Reference</h2><p>An 8-character code that stands in for the entry QR when the phone cannot be scanned.</p></div>

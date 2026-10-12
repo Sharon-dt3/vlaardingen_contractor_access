@@ -106,7 +106,7 @@ invitation flow was removed or changed.
    verified address (as a PNG attachment with the reference and the time it is valid until), so the person
    still has it if they close the page. The send happens after the page is returned and never undoes the
    registration if it fails. Without the email check the address is unverified, so nothing is sent to it.
-   The QR holds a random secret; only its hash is stored. It is valid for 12 hours.
+   The QR holds a random secret; only its hash is stored. Its validity is set per site on the Settings page (12 hours by default).
 5. **At the kiosk** (the Gate kiosk page, above the original invitation kiosk, which is unchanged) the
    operator scans that QR with the camera or an uploaded image, or types the reference. A scan fills the
    reference into the box (the QR holds `renewi-walkup:<reference>:<secret>`) and the operator presses Check. The kiosk shows
@@ -211,3 +211,91 @@ upload form, and not tried against real AWS or another provider.
   confirmation, its wording and the timeline entry. Ruben was refused at the gate screen.
 - Not run: the Playwright end-to-end and Selenium browser suites (they need Docker). They use the named
   demo people, who all remain valid.
+
+## Configurable access validity (per site)
+
+An administrator now sets, on the Settings page and for each site:
+
+- the **default visit length** for planned arrivals (Path A). It pre-fills the end of a new invitation
+  (8 hours if never set, 1 to 168 allowed). Staff can still change the end for one invitation.
+- how long a **walk-up entry QR stays valid** (Path B), replacing the 12 hours that was fixed in the code
+  (12 hours if never set, 1 to 72 allowed).
+
+New invitations and new QR codes use the new numbers. A QR code that was already issued keeps the expiry
+it was given, because the kiosk now checks each QR's own stored expiry. Every change is written to the
+audit trail (`site_settings.updated`, with the old and new values and who made it).
+
+Changed files: `models/walk_up.py` (`SiteAccessSettings`), migration `20261011_0019`, `services/site_settings.py`,
+`routes/site_settings.py` (`GET /api/site-settings`, `GET/PUT /api/site-settings/{site}`; only an administrator
+may change it), `services/walk_up.py`, `components/settings/site-access-settings.tsx`,
+`invitation-workspace.tsx`, `tests/api/test_site_settings.py`.
+
+## Entry and exit time on the QR
+
+Both QR codes now state when entry opens and when the QR stops working, in the site's own time zone
+(Europe/Amsterdam for Vlaardingen), so the person, the email and the gate all show the same clock time.
+
+- **Path A access QR:** the QR card staff see after issuing it, and the email to the invitee, show
+  "Entry from" (the visit start) and "Exit by" (the token's expiry).
+- **Path B entry QR:** the receipt page and the emailed copy show "Entry from" (when they registered) and
+  "Exit by" (registration plus the configured validity).
+
+Changed: `providers/time_format.py`, both email providers, `TokenIssueResponse` (`valid_from`, `site_timezone`),
+the walk-up receipt (`site_timezone`), `batch3-workspace.tsx`, `walk-up-registration.tsx`, `lib/domain.ts`.
+
+## Entry and exit time chosen when the access QR is issued (Path A)
+
+When staff issue an access QR, they now see "Entry from" and "Exit by", pre-filled with the visit window.
+They can narrow the window but not widen it: the entry time cannot be before the visit starts, the exit time
+cannot be after it ends, and the entry must come before the exit. The QR card, the email to the invitee and the
+token history all show both times, and the gate refuses the QR before its entry time
+(`TOKEN_NOT_YET_VALID`) as it already did after its exit time (`TOKEN_EXPIRED`).
+
+Changed: `access_tokens.valid_from` (migration `20261012_0020`), `issue_access_token`, `TokenIssueCommand`,
+the gate's token check in `services/batch4.py`, `batch3-workspace.tsx`. Tokens issued before this have no
+entry time and follow the visit start.
+
+## Dashboard: planned and unexpected arrivals side by side
+
+The Overview dashboard now has a table, "Planned and unexpected arrivals", with **On site now**, **Entered**
+and **Exited** for planned arrivals (Path A, through an invitation), unexpected arrivals (Path B, the entrance
+QR) and the total. It follows the site chosen at the top of the dashboard. The existing tiles are unchanged, and
+planned plus unexpected always equals the figure in the tiles. The API returns it as `by_path` on the totals
+and on each site. Changed: `services/walk_up.py` (`merge_walk_ups_into_dashboard`), `schemas/batch5.py`,
+`operational-dashboard.tsx`, `lib/domain.ts`, and a test in `tests/api/test_walk_up.py`.
+
+## Longest access QR (Path A) and walk-up entry time (Path B)
+
+Two more settings on the Settings page, per site:
+
+- **Longest an access QR may last (hours, 1 to 168, default 24).** Staff still choose each QR's entry and exit
+  time, but the exit cannot be more than this long after the entry. When no exit is chosen, the QR runs to the
+  visit end or to this limit, whichever is sooner. A longer choice is refused with a clear message (screen and API).
+- **Walk-up entry opens after registering (minutes, 0 to 240, default 0).** The QR starts working that long
+  after the person registers, and the valid hours (the existing setting) count from that moment. The kiosk
+  refuses it before then (`PASS_NOT_YET_VALID`, "Entry opens at HH:MM") and records the refusal.
+
+The kiosk result for a walk-up now shows "Entry from", "Exit by" in the site's time zone and the time left
+("opens in 1 min", "4 h 0 min left", "expired"). The receipt and the emailed QR use the same entry time.
+
+Changed: migration `20261012_0021` (`site_access_settings`, `walk_up_registrations.pass_valid_from`),
+`services/site_settings.py` (`access_qr_window`), `routes/batch3.py`, `services/walk_up.py`,
+`walk-up-gate-check.tsx`, `site-access-settings.tsx`, `batch3-workspace.tsx`, and tests in
+`tests/api/test_site_settings.py`.
+
+## Live dashboard and overdue people
+
+- **Live:** the dashboard and its on-site roster refresh themselves every 15 seconds while the tab is visible,
+  and the page shows when it was last updated.
+- **Overdue:** anyone still on site after they should have left is flagged. For a walk-up person that is their
+  QR's exit time. For an invited person it is the earlier of the visit end and their QR's exit time. The roster shows
+  an "Overdue by X" badge and the time they should have left, there is a new "Overdue on site" tile, and the
+  planned and unexpected table has an overdue row.
+- **Nobody drops off the roster.** The invitation projection used to stop listing a person at the visit end, so an invited
+  person who never left disappeared from the dashboard. Those people are now found and listed as overdue, and counted
+  in "Currently present". Walk-up people were never hidden; the old unused 24-hour "stale" marker is replaced by the
+  overdue flag.
+
+Changed: `services/batch5.py` (`ended_only` option, default off), `services/walk_up.py` (`mark_planned_presence`,
+`merge_walk_ups_into_dashboard`, `list_on_site`), `routes/batch5.py`, `schemas/batch5.py`, `schemas/walk_up.py`,
+`operational-dashboard.tsx`, `lib/domain.ts`, tests in `tests/api/test_walk_up.py`.

@@ -23,6 +23,8 @@ import { StatusBadge, type StatusTone } from "@/components/ui/status-badge";
 import { ApiError, apiRequest } from "@/lib/api-client";
 import type {
   CurrentPresence,
+  DashboardByPath,
+  DashboardPathCounts,
   DashboardDecision,
   DashboardSite,
   DashboardSnapshot,
@@ -46,6 +48,62 @@ function errorMessage(error: unknown): string {
 
 function decisionTone(decision: DashboardDecision["decision"]): StatusTone {
   return decision === "GRANT" ? "success" : "danger";
+}
+
+// People on site, entered and exited, split into planned (invited) and unexpected (walk-up) arrivals.
+function PathBreakdown({ byPath }: { byPath?: DashboardByPath | null }) {
+  if (!byPath) return null;
+  const rows: { label: string; key: keyof DashboardPathCounts }[] = [
+    { label: "On site now", key: "present_count" },
+    { label: "Entered", key: "entry_count" },
+    { label: "Exited", key: "exit_count" },
+    { label: "Overdue (still on site after their exit time)", key: "overdue_count" }
+  ];
+  return (
+    <section aria-labelledby="path-breakdown" className="surface overflow-hidden">
+      <div className="border-b border-slate-200 px-5 py-4">
+        <h3 className="text-base font-semibold text-slate-950" id="path-breakdown">
+          Planned and unexpected arrivals
+        </h3>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Planned arrivals came through an invitation (Path A). Unexpected arrivals registered at
+          the entrance QR (Path B).
+        </p>
+      </div>
+      <table className="w-full text-sm">
+        <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+          <tr>
+            <th className="px-5 py-3 font-semibold" scope="col"></th>
+            <th className="px-5 py-3 font-semibold" scope="col">Planned (Path A)</th>
+            <th className="px-5 py-3 font-semibold" scope="col">Unexpected (Path B)</th>
+            <th className="px-5 py-3 font-semibold" scope="col">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr className="border-t border-slate-100" key={row.key}>
+              <th className="px-5 py-3 text-left font-medium text-slate-700" scope="row">
+                {row.label}
+              </th>
+              <td className="px-5 py-3 font-semibold text-slate-950">{byPath.planned[row.key] ?? 0}</td>
+              <td className="px-5 py-3 font-semibold text-slate-950">{byPath.walk_up[row.key] ?? 0}</td>
+              <td className="px-5 py-3 font-semibold text-slate-950">
+                {(byPath.planned[row.key] ?? 0) + (byPath.walk_up[row.key] ?? 0)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
+const LIVE_REFRESH_MS = 15_000;
+
+// "45 min" or "2 h 10 min".
+function formatOverdue(minutes: number): string {
+  const hours = Math.floor(minutes / 60);
+  return hours > 0 ? `${hours} h ${minutes % 60} min` : `${minutes} min`;
 }
 
 function MetricCard({
@@ -150,7 +208,7 @@ function RosterTable({
             <th className="px-4 py-3 font-semibold">Person</th>
             <th className="px-4 py-3 font-semibold">Population</th>
             <th className="px-4 py-3 font-semibold">Entry recorded</th>
-            <th className="px-4 py-3 font-semibold">Scheduled visit end</th>
+            <th className="px-4 py-3 font-semibold">Exit by</th>
             <th className="px-4 py-3 font-semibold">Authoritative status</th>
             {canRecordExit ? <th className="px-4 py-3 font-semibold">Action</th> : null}
           </tr>
@@ -158,7 +216,7 @@ function RosterTable({
         <tbody>
           {people.map((person) => (
             <tr
-              className="border-b border-slate-100 last:border-0"
+              className={`border-b border-slate-100 last:border-0 ${person.overdue ? "bg-amber-50" : ""}`}
               key={person.visit_id ?? person.walk_up_registration_id ?? person.person_id}
             >
               <td className="px-4 py-4">
@@ -176,10 +234,24 @@ function RosterTable({
               <td className="px-4 py-4 text-slate-700">{enumLabel(person.population)}</td>
               <td className="px-4 py-4 text-slate-700">{formatDateTime(person.entered_at)}</td>
               <td className="px-4 py-4 text-slate-700">
-                {person.visit_ends_at ? formatDateTime(person.visit_ends_at) : "No scheduled end"}
+                {person.exit_due_at || person.visit_ends_at
+                  ? formatDateTime((person.exit_due_at ?? person.visit_ends_at) as string)
+                  : "No exit time recorded"}
               </td>
               <td className="px-4 py-4">
                 <StatusBadge tone="success">{person.decision}</StatusBadge>
+                {person.overdue ? (
+                  <span className="mt-1 block">
+                    <StatusBadge tone="warning">
+                      Overdue{person.overdue_minutes ? ` by ${formatOverdue(person.overdue_minutes)}` : ""}
+                    </StatusBadge>
+                    {person.exit_due_at ? (
+                      <span className="mt-1 block text-xs text-amber-900">
+                        Should have left by {formatDateTime(person.exit_due_at)}
+                      </span>
+                    ) : null}
+                  </span>
+                ) : null}
               </td>
               {canRecordExit ? (
                 <td className="px-4 py-4">
@@ -341,7 +413,10 @@ export function OperationalDashboard() {
     queryKey: ["dashboard", "snapshot"],
     queryFn: () => apiRequest<DashboardSnapshot>("/api/dashboard?activity_hours=24&recent_limit=20"),
     enabled: hasPermission("dashboard:read"),
-    retry: false
+    retry: false,
+    // Live view: the numbers refresh on their own so a manager watching sees people arrive and leave.
+    refetchInterval: LIVE_REFRESH_MS,
+    refetchIntervalInBackground: false
   });
   const presenceQuery = useQuery({
     queryKey: ["presence", selectedSiteId || "all"],
@@ -350,7 +425,9 @@ export function OperationalDashboard() {
         selectedSiteId ? `/api/presence?site_id=${encodeURIComponent(selectedSiteId)}` : "/api/presence"
       ),
     enabled: hasPermission("presence:read"),
-    retry: false
+    retry: false,
+    refetchInterval: LIVE_REFRESH_MS,
+    refetchIntervalInBackground: false
   });
 
   useEffect(() => {
@@ -475,15 +552,19 @@ export function OperationalDashboard() {
       <p className="flex items-center gap-2 text-xs text-muted-foreground">
         <Clock3 aria-hidden="true" className="h-4 w-4" />
         Presence evaluated at effective demo time {formatDateTime(snapshot.as_of)} · simulated activity window begins{" "}
-        {formatDateTime(snapshot.activity_window_started_at)}
+        {formatDateTime(snapshot.activity_window_started_at)} · live: refreshes every 15 seconds, last updated{" "}
+        {dashboardQuery.dataUpdatedAt ? new Date(dashboardQuery.dataUpdatedAt).toLocaleTimeString() : "just now"}
       </p>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <MetricCard icon={UsersRound} label="Currently present" value={selectedSite?.present_count ?? snapshot.totals.present_count} />
         <MetricCard icon={Activity} label="Active visits" tone="blue" value={selectedSite?.active_visit_count ?? snapshot.totals.active_visit_count} />
         <MetricCard icon={CheckCircle2} label="Access grants" value={selectedSite?.grant_count ?? snapshot.totals.grant_count} />
         <MetricCard icon={ShieldAlert} label="Access denials" tone="red" value={selectedSite?.denial_count ?? snapshot.totals.denial_count} />
+        <MetricCard icon={Clock3} label="Overdue on site" tone="red" value={selectedSite?.overdue_count ?? snapshot.totals.overdue_count ?? 0} />
       </div>
+
+      <PathBreakdown byPath={(selectedSite ?? snapshot.totals).by_path} />
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(20rem,0.85fr)]">
         <section className="surface overflow-hidden" aria-labelledby="site-roster">

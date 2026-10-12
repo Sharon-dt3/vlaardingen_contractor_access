@@ -107,8 +107,13 @@ def _current_presence_rows(
     *,
     observed_at: datetime,
     site_id: uuid.UUID | None = None,
+    ended_only: bool = False,
 ) -> list[dict[str, Any]]:
-    """Return eligible visits whose latest recorded occupancy event is an entry."""
+    """Return eligible visits whose latest recorded occupancy event is an entry.
+
+    With ``ended_only`` it returns the opposite window: visits whose time has run out
+    but whose person was never recorded as leaving, so the dashboard can flag them.
+    """
 
     statement = (
         select(GateEvent, Visit, Person, Site)
@@ -123,7 +128,7 @@ def _current_presence_rows(
             # without changing that status. Blocked or closed visits stay out.
             Visit.status.in_((VisitStatus.PLANNED, VisitStatus.ACTIVE)),
             Visit.starts_at <= observed_at,
-            Visit.ends_at > observed_at,
+            (Visit.ends_at <= observed_at) if ended_only else (Visit.ends_at > observed_at),
         )
         .order_by(GateEvent.occurred_at.desc(), GateEvent.id.desc())
     )

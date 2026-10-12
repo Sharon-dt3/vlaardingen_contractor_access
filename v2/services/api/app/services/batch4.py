@@ -56,6 +56,16 @@ _GATE_CHECK_PRECEDENCE = {
 _COMPLIANCE_CHECK_PRECEDENCE = 80
 
 
+def _token_current(token: AccessToken, evaluated_at: datetime) -> bool:
+    """Active, not past its exit time, and past its entry time if one was set."""
+
+    return (
+        token.status is AccessTokenStatus.ACTIVE
+        and token.expires_at > evaluated_at
+        and (token.valid_from is None or token.valid_from <= evaluated_at)
+    )
+
+
 def _check(
     *,
     code: str,
@@ -411,24 +421,20 @@ def evaluate_gate_access(
         _check(
             code="TOKEN",
             label="Opaque access token",
-            passed=(
-                token.status is AccessTokenStatus.ACTIVE
-                and token.expires_at > evaluated_at
-            ),
+            passed=_token_current(token, evaluated_at),
             reason_code=(
                 "TOKEN_EXPIRED"
                 if token.expires_at <= evaluated_at
+                else "TOKEN_NOT_YET_VALID"
+                if token.valid_from is not None and token.valid_from > evaluated_at
                 else "TOKEN_INACTIVE"
             ),
             detail=(
                 "The opaque access token is active and current."
-                if (
-                    token.status is AccessTokenStatus.ACTIVE
-                    and token.expires_at > evaluated_at
-                )
-                else "The opaque access token is expired, revoked, or inactive."
+                if _token_current(token, evaluated_at)
+                else "The opaque access token is not yet valid, expired, revoked, or inactive."
             ),
-            corrective_action="Issue a new approved access token.",
+            corrective_action="Issue a new approved access token, or wait until its entry time.",
         ),
         _check(
             code="SITE",

@@ -48,6 +48,7 @@ import type {
 import {
   enumLabel,
   formatDateTime,
+  formatInSiteZone,
   statusTone
 } from "@/lib/domain";
 
@@ -1262,8 +1263,44 @@ function BlacklistPanel({
   );
 }
 
+// A datetime-local input wants "YYYY-MM-DDTHH:mm" in the browser's own zone.
+function toLocalInput(iso: string): string {
+  const date = new Date(iso);
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
+
 function AccessTokenPanel({ visit }: { visit: Visit }) {
   const { hasPermission } = useAuth();
+  // The site's longest-QR rule (hours), set by an administrator on the Settings page.
+  const siteSettingsQuery = useQuery({
+    queryKey: ["site-settings"],
+    queryFn: () =>
+      apiRequest<{ site_id: string; access_qr_max_hours: number }[]>("/api/site-settings")
+  });
+  const maxQrHours =
+    siteSettingsQuery.data?.find((row) => row.site_id === visit.site_id)?.access_qr_max_hours ?? 24;
+  // Entry and exit time of the QR. They start as the visit window, limited to the longest allowed.
+  const [entryFrom, setEntryFrom] = useState(() => toLocalInput(visit.starts_at));
+  const [exitByChoice, setExitByChoice] = useState<string | null>(null);
+  const defaultExit = (() => {
+    const start = entryFrom ? new Date(entryFrom).getTime() : new Date(visit.starts_at).getTime();
+    const latest = Math.min(new Date(visit.ends_at).getTime(), start + maxQrHours * 3600000);
+    return toLocalInput(new Date(latest).toISOString());
+  })();
+  const exitBy = exitByChoice ?? defaultExit;
+  const setExitBy = (value: string) => setExitByChoice(value);
+  const windowError =
+    !entryFrom || !exitBy
+      ? "Choose both an entry time and an exit time."
+      : new Date(entryFrom) < new Date(toLocalInput(visit.starts_at))
+        ? "The entry time cannot be before the visit starts."
+        : new Date(exitBy) > new Date(toLocalInput(visit.ends_at))
+          ? "The exit time cannot be after the visit ends."
+          : new Date(entryFrom) >= new Date(exitBy)
+            ? "The entry time must be before the exit time."
+            : new Date(exitBy).getTime() - new Date(entryFrom).getTime() > maxQrHours * 3600000
+              ? `This site allows an access QR to last at most ${maxQrHours} hours. Choose an earlier exit time.`
+              : null;
   const queryClient = useQueryClient();
   const [issuedToken, setIssuedToken] = useState<TokenIssueResponse | null>(null);
   const tokenIssuanceInFlight = useRef(false);
@@ -1296,7 +1333,10 @@ function AccessTokenPanel({ visit }: { visit: Visit }) {
     mutationFn: () =>
       apiRequest<TokenIssueResponse>(`/api/visits/${visit.id}/tokens`, {
         method: "POST",
-        body: {}
+        body: {
+          valid_from: new Date(entryFrom).toISOString(),
+          expires_at: new Date(exitBy).toISOString()
+        }
       }),
     onSuccess: async (response) => {
       setIssuedToken(response);
@@ -1309,7 +1349,7 @@ function AccessTokenPanel({ visit }: { visit: Visit }) {
     // second request before the button becomes disabled.
     // Only roles allowed to read the clock use it as a client-side guard;
     // the token API enforces visit expiry for every role.
-    if (tokenIssuanceInFlight.current || (canReadClock && (clockQuery.isPending || clockQuery.isError || visitHasEnded))) {
+    if (windowError || tokenIssuanceInFlight.current || (canReadClock && (clockQuery.isPending || clockQuery.isError || visitHasEnded))) {
       return;
     }
 
@@ -1399,9 +1439,44 @@ function AccessTokenPanel({ visit }: { visit: Visit }) {
               the effective demo time and reject an ended visit.
             </p>
           ) : null}
+          <fieldset className="mb-4 rounded-xl border border-slate-200 p-4">
+            <legend className="px-1 text-sm font-semibold text-slate-950">
+              When the QR works
+            </legend>
+            <div className="flex flex-wrap gap-4">
+              <label className="text-sm text-slate-700">
+                Entry from
+                <input
+                  className="mt-1 block rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950"
+                  min={toLocalInput(visit.starts_at)}
+                  max={toLocalInput(visit.ends_at)}
+                  onChange={(event) => setEntryFrom(event.target.value)}
+                  type="datetime-local"
+                  value={entryFrom}
+                />
+              </label>
+              <label className="text-sm text-slate-700">
+                Exit by
+                <input
+                  className="mt-1 block rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950"
+                  min={toLocalInput(visit.starts_at)}
+                  max={toLocalInput(visit.ends_at)}
+                  onChange={(event) => setExitBy(event.target.value)}
+                  type="datetime-local"
+                  value={exitBy}
+                />
+              </label>
+            </div>
+            <p className="mt-2 text-xs text-slate-500">
+              Starts as the visit window ({formatDateTime(visit.starts_at)} to{" "}
+              {formatDateTime(visit.ends_at)}) and can be narrowed, not widened. An administrator limits an access QR to {maxQrHours} hours at this site. The gate refuses
+              the QR before the entry time and after the exit time.
+            </p>
+            {windowError ? <p className="mt-2 text-sm text-red-700">{windowError}</p> : null}
+          </fieldset>
           <button
             className={primaryButton}
-            disabled={issueMutation.isPending || (canReadClock && (clockQuery.isPending || clockQuery.isError || visitHasEnded))}
+            disabled={Boolean(windowError) || issueMutation.isPending || (canReadClock && (clockQuery.isPending || clockQuery.isError || visitHasEnded))}
             onClick={issueToken}
             type="button"
           >
@@ -1449,7 +1524,7 @@ function AccessTokenPanel({ visit }: { visit: Visit }) {
                     Issued {formatDateTime(token.issued_at)}
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Expires {formatDateTime(token.expires_at)}
+                    {token.valid_from ? `Entry ${formatDateTime(token.valid_from)} · ` : ""}Exit {formatDateTime(token.expires_at)}
                     {token.revoke_reason ? ` · ${token.revoke_reason}` : ""}
                   </p>
                 </div>
@@ -1553,9 +1628,16 @@ function QrCard({
       <div id={printableId}>
         <p className="eyebrow text-emerald-800">One-time QR payload</p>
         <h3 className="mt-2 text-lg font-semibold text-slate-950">Renewi Access</h3>
-        <p className="mt-1 text-sm text-slate-700">
-          Valid until {formatDateTime(response.token.expires_at)}
-        </p>
+        <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm text-slate-700">
+          {response.valid_from ? (
+            <>
+              <dt className="font-semibold">Entry from</dt>
+              <dd>{formatInSiteZone(response.valid_from, response.site_timezone)}</dd>
+            </>
+          ) : null}
+          <dt className="font-semibold">Exit by</dt>
+          <dd>{formatInSiteZone(response.token.expires_at, response.site_timezone)}</dd>
+        </dl>
         <div className="mt-5 flex justify-center rounded-xl bg-white p-5">
           <QRCodeSVG
             bgColor="#ffffff"

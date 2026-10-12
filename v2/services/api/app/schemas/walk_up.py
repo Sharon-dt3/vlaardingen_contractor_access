@@ -74,7 +74,10 @@ class WalkUpRegistrationReceipt(BaseModel):
     rules_version: int
     language: str
     pass_qr: str
+    pass_valid_from: datetime | None = None
     pass_valid_until: datetime
+    # The site's time zone, so the page shows entry and exit times the way the gate sees them.
+    site_timezone: str = "UTC"
     # Set when a copy of the entry QR is being emailed to the verified address.
     emailed_to: str | None = None
 
@@ -140,6 +143,9 @@ class GateWalkUpResponse(BaseModel):
     population: str
     site_name: str
     registered_at: datetime
+    pass_valid_from: datetime
+    pass_valid_until: datetime
+    site_timezone: str = "UTC"
     rules_version: int | None
     rules_language: str | None
     eligible: bool
@@ -202,7 +208,9 @@ class WalkUpOnSiteRow(BaseModel):
     site_key: str
     admitted_at: datetime
     admitted_by: str | None
-    stale: bool
+    exit_due_at: datetime
+    overdue: bool
+    overdue_minutes: int | None = None
 
 
 class GateRefuseRequest(BaseModel):

@@ -39,7 +39,7 @@ from app.models.life_saving import (
     LifeSavingRulesAcknowledgement,
     LifeSavingRulesVersion,
 )
-from app.models.walk_up import WalkUpPending, WalkUpRegistration
+from app.models.walk_up import SiteAccessSettings, WalkUpPending, WalkUpRegistration
 from app.models.batch6 import (
     DemoClock,
     ExpiryAlert,
@@ -76,6 +76,7 @@ __all__ = [
     "IdentityVerification",
     "Invitation",
     "LifeSavingRulesAcknowledgement",
+    "SiteAccessSettings",
     "WalkUpPending",
     "WalkUpRegistration",
     "LifeSavingRulesVersion",

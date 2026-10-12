@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import smtplib
+from datetime import datetime
 from io import BytesIO
 from email.message import EmailMessage
 
 import qrcode
+
+from app.providers.time_format import entry_exit_lines
 
 from app.config import Settings
 from app.models import AccessToken, Invitation, Site
@@ -81,6 +84,7 @@ def send_access_token_email(
     site: Site,
     token: AccessToken,
     qr_payload: str,
+    valid_from: datetime | None = None,
 ) -> None:
     """Email the invitee a downloadable, gate-readable PNG for a newly issued token.
 
@@ -110,7 +114,8 @@ def send_access_token_email(
         message.set_content(
             f"Your access QR for {site.name} is attached as a PNG image.\n"
             "Download the image and bring it with you for verification at the gate.\n"
-            f"The token expires at {token.expires_at.isoformat()}.\n"
+            "Your QR is valid for this window:\n"
+            f"{entry_exit_lines(valid_from, token.expires_at, site.timezone)}"
             "An issued token does not guarantee admission: the gate checks the "
             "current visit, identity, approval, and compliance requirements.\n"
             "Keep the image private and do not forward this email.\n"

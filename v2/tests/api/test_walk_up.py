@@ -12,13 +12,14 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.commands import _demo_id
 from app.database.session import get_db
 from app.models import (
     AuditEvent,
+    SiteAccessSettings,
     Company,
     LifeSavingRulesAcknowledgement,
     LifeSavingRulesVersion,
@@ -34,7 +35,6 @@ from app.services.walk_up import (
     MAX_CODE_ATTEMPTS,
     MAX_CODE_SENDS,
     MAX_CODES_PER_EMAIL_PER_HOUR,
-    STALE_ON_SITE_HOURS,
     admit_at_gate,
     email_hint,
     refuse_at_gate,
@@ -66,6 +66,8 @@ def database():
         if not session.scalar(select(func.count()).select_from(LifeSavingRulesVersion)):
             pytest.skip("The database is not migrated and seeded.")
         session.scalar(select(func.count()).select_from(WalkUpRegistration))
+        # An administrator may have changed the validity in the demo; tests assume the defaults.
+        session.execute(delete(SiteAccessSettings))
     except Exception:  # pragma: no cover - tables missing
         pytest.skip("The database is not migrated and seeded.")
     try:
@@ -245,7 +247,7 @@ def test_api_registration_round_trip_and_error_codes(client: TestClient, databas
     receipt = ok.json()
     assert set(receipt) == {
         "reference", "site_name", "registered_at", "rules_version", "language", "pass_qr", "pass_valid_until",
-        "emailed_to",
+        "pass_valid_from", "site_timezone", "emailed_to",
     }
     assert len(receipt["reference"]) == 8 and ok.headers["cache-control"] == "no-store"
     database.commit()  # the route rolls back rejected requests; keep the setup
@@ -347,6 +349,7 @@ def test_unknown_expired_and_wrong_site_codes_are_refused(database: Session) -> 
         lookup_for_gate(database, actor=_admin(database), site_key_value="nowhere", code=secret)
     assert wrong_site.value.status_code == 404
     registration.registered_at = datetime.now(timezone.utc) - timedelta(hours=PASS_VALID_HOURS + 1)
+    registration.pass_expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
     database.flush()
     with pytest.raises(WorkflowError) as expired:
         lookup_for_gate(database, actor=_admin(database), site_key_value="vlaardingen", code=secret)
@@ -617,10 +620,13 @@ def test_the_on_site_list_shows_only_people_let_in_who_have_not_left(database: S
     names = [row["first_name"] for row in list_on_site(database)]
     assert "Inside" in names and "Gone" not in names and "Waiting" not in names
     row = next(r for r in list_on_site(database) if r["first_name"] == "Inside")
-    assert row["stale"] is False and row["admitted_by"] == admin.display_name
-    inside.admitted_at = datetime.now(timezone.utc) - timedelta(hours=STALE_ON_SITE_HOURS + 1)
+    assert row["overdue"] is False and row["overdue_minutes"] is None and row["admitted_by"] == admin.display_name
+    # Past the QR's exit time they stay on the list, flagged as overdue, however long they have been inside.
+    inside.pass_expires_at = datetime.now(timezone.utc) - timedelta(minutes=90)
+    inside.admitted_at = datetime.now(timezone.utc) - timedelta(hours=40)
     database.flush()
-    assert next(r for r in list_on_site(database) if r["first_name"] == "Inside")["stale"] is True
+    late = next(r for r in list_on_site(database) if r["first_name"] == "Inside")
+    assert late["overdue"] is True and 89 <= late["overdue_minutes"] <= 91
 
 
 # --- the email check and the on-site list through the API ---------------------
@@ -950,6 +956,30 @@ def test_walk_ups_are_counted_in_the_main_dashboard_numbers(database: Session) -
     assert _vlaardingen(left)["exit_count"] == _vlaardingen(before)["exit_count"] + 1
 
 
+def test_the_dashboard_splits_planned_and_unexpected_arrivals(database: Session) -> None:
+    before = _snapshot(database)
+    site_before = _vlaardingen(before)["by_path"]
+    registration, *_ = register_walk_up(database, **_details(database, first_name="Split", email="split@example.com"))
+    admin = _admin(database)
+
+    admit_at_gate(database, actor=admin, site_key_value="vlaardingen", registration_id=registration.id)
+    entered = _snapshot(database)
+    site = _vlaardingen(entered)["by_path"]
+    assert site["walk_up"]["present_count"] == site_before["walk_up"]["present_count"] + 1
+    assert site["walk_up"]["entry_count"] == site_before["walk_up"]["entry_count"] + 1
+    assert site["planned"] == site_before["planned"]  # an unexpected arrival never changes the planned counts
+    for key in ("present_count", "entry_count", "exit_count"):
+        # planned plus unexpected always equals the figure shown in the main tiles
+        assert site["planned"][key] + site["walk_up"][key] == _vlaardingen(entered)[key]
+        assert entered["totals"]["by_path"]["planned"][key] + entered["totals"]["by_path"]["walk_up"][key] == entered["totals"][key]
+
+    record_exit(database, actor=admin, site_key_value="vlaardingen", registration_id=registration.id)
+    left = _vlaardingen(_snapshot(database))["by_path"]
+    assert left["walk_up"]["present_count"] == site_before["walk_up"]["present_count"]
+    assert left["walk_up"]["exit_count"] == site_before["walk_up"]["exit_count"] + 1
+    assert left["planned"] == site_before["planned"]
+
+
 def test_walk_ups_appear_in_the_roster_and_the_recent_decisions(database: Session) -> None:
     registration, *_ = register_walk_up(database, **_details(database, first_name="Roster", email="roster@example.com"))
     admin = _admin(database)
@@ -1143,3 +1173,40 @@ def test_without_the_email_check_the_qr_is_not_emailed(client: TestClient, datab
     ok = client.post("/api/walk-up/registrations", json=_body(database))
     assert ok.status_code == 201 and ok.json()["emailed_to"] is None
     assert sent == []  # the address was never verified, so nothing is sent to it
+
+
+def test_people_still_inside_after_their_exit_time_are_flagged_overdue_and_counted(database: Session) -> None:
+    before = _snapshot(database)
+    registration, *_ = register_walk_up(database, **_details(database, first_name="Late", email="late@example.com"))
+    admit_at_gate(database, actor=_admin(database), site_key_value="vlaardingen", registration_id=registration.id)
+    inside = _snapshot(database)
+    assert _vlaardingen(inside)["overdue_count"] == _vlaardingen(before)["overdue_count"]
+
+    registration.pass_expires_at = datetime.now(timezone.utc) - timedelta(minutes=30)
+    database.flush()
+    late = _snapshot(database)
+    site = _vlaardingen(late)
+    assert site["overdue_count"] == _vlaardingen(before)["overdue_count"] + 1
+    assert site["by_path"]["walk_up"]["overdue_count"] == _vlaardingen(before)["by_path"]["walk_up"]["overdue_count"] + 1
+    assert late["totals"]["overdue_count"] == before["totals"]["overdue_count"] + 1
+    assert site["present_count"] == _vlaardingen(inside)["present_count"]  # still counted as on site
+    row = next(r for r in late["current_presence"] if r.get("walk_up_registration_id") == registration.id)
+    assert row["overdue"] is True and row["overdue_minutes"] >= 29
+
+    record_exit(database, actor=_admin(database), site_key_value="vlaardingen", registration_id=registration.id)
+    assert _vlaardingen(_snapshot(database))["overdue_count"] == _vlaardingen(before)["overdue_count"]
+
+
+def test_an_invited_person_still_inside_after_their_visit_ended_is_not_lost(database: Session) -> None:
+    """The invitation projection drops them at the visit end; the dashboard keeps and flags them."""
+
+    from app.models import GateEvent, PresenceEvent, Visit
+    from app.services.batch5 import _current_presence_rows
+
+    snapshot = _snapshot(database)
+    as_of = snapshot["as_of"]
+    ended = _current_presence_rows(database, observed_at=as_of, ended_only=True)
+    live = {row["visit_id"] for row in _current_presence_rows(database, observed_at=as_of)}
+    assert not {row["visit_id"] for row in ended} & live  # never both lists
+    flagged = [row for row in snapshot["current_presence"] if row.get("visit_id") in {r["visit_id"] for r in ended}]
+    assert len(flagged) == len(ended) and all(row["overdue"] for row in flagged)

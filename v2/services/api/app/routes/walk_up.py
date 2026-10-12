@@ -84,6 +84,8 @@ def _email_entry_qr(
     reference: str,
     valid_until: datetime,
     qr_png: bytes,
+    valid_from: datetime | None = None,
+    timezone_name: str = "UTC",
 ) -> None:
     """Send the entry QR after the response. A failure never undoes the registration."""
 
@@ -96,6 +98,8 @@ def _email_entry_qr(
             reference=reference,
             valid_until=valid_until,
             qr_png=qr_png,
+            valid_from=valid_from,
+            timezone_name=timezone_name,
         )
         _LOGGER.info("Walk-up entry QR emailed for registration %s.", reference)
     except WalkUpEmailError:
@@ -276,7 +280,9 @@ def post_walk_up_registration(
             rules_version=rules.version,
             language=acknowledgement.language,
             pass_qr=pass_qr_data_url(pass_secret, reference_for(registration.id)),
+            pass_valid_from=registration.pass_valid_from,
             pass_valid_until=registration.pass_expires_at,
+            site_timezone=site.timezone,
         )
         database.commit()
         return receipt
@@ -334,7 +340,9 @@ def post_walk_up_verify(
             rules_version=rules.version,
             language=acknowledgement.language,
             pass_qr=pass_qr_data_url(pass_secret, reference),
+            pass_valid_from=registration.pass_valid_from,
             pass_valid_until=registration.pass_expires_at,
+            site_timezone=site.timezone,
             emailed_to=email_hint(person.email),
         )
         email_job = dict(
@@ -343,6 +351,8 @@ def post_walk_up_verify(
             site_name=site.name,
             reference=reference,
             valid_until=registration.pass_expires_at,
+            valid_from=registration.pass_valid_from,
+            timezone_name=site.timezone,
             qr_png=pass_qr_png(pass_secret, reference),
         )
         database.commit()

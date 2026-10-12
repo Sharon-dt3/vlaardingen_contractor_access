@@ -380,6 +380,12 @@ class AccessToken(Base):
         DateTime(timezone=True),
         nullable=False,
     )
+    # When entry opens. Empty on tokens issued before this was configurable: they
+    # follow the visit's start.
+    valid_from: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     revoked_by_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("user_accounts.id", ondelete="SET NULL"),

@@ -353,6 +353,17 @@ function InvitationCreatePanel({
     }
   });
 
+  // The default visit length is an administrator setting for the chosen site (8 hours if unset).
+  const selectedSiteId = form.watch("site_id");
+  const settingsQuery = useQuery({
+    queryKey: ["site-settings"],
+    queryFn: () => apiRequest<{ site_id: string; visit_default_hours: number }[]>("/api/site-settings")
+  });
+  const visitHours =
+    settingsQuery.data?.find((row) => row.site_id === selectedSiteId)?.visit_default_hours ??
+    settingsQuery.data?.[0]?.visit_default_hours ??
+    8;
+
   useEffect(() => {
     if (!clockQuery.data) return;
     // Do not overwrite either field once the requester has chosen a visit window.
@@ -360,9 +371,9 @@ function InvitationCreatePanel({
       form.setValue("starts_at", defaultDateTime(clockQuery.data.effective_at, 0, "down"));
     }
     if (!form.getFieldState("ends_at").isDirty) {
-      form.setValue("ends_at", defaultDateTime(clockQuery.data.effective_at, 8));
+      form.setValue("ends_at", defaultDateTime(clockQuery.data.effective_at, visitHours));
     }
-  }, [clockQuery.data, form]);
+  }, [clockQuery.data, form, visitHours]);
 
   const mutation = useMutation({
     mutationFn: async (values: InvitationForm) => {

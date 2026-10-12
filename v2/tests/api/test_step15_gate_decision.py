@@ -133,6 +133,7 @@ class GateHarness:
             visit_id=self.visit.id,
             status=AccessTokenStatus.ACTIVE,
             expires_at=NOW + timedelta(hours=1),
+            valid_from=None,
         )
         self.invitation = SimpleNamespace(
             id=uuid.uuid4(),
@@ -553,6 +554,20 @@ def test_repeated_evaluations_do_not_require_a_new_presented_id_scan(
     assert first["gate_event_id"] != second["gate_event_id"]
     assert len(gate_harness.audit_events) == 2
     assert all(event["action"] == "gate.granted" for event in gate_harness.audit_events)
+
+
+def test_a_token_is_refused_before_its_entry_time_and_accepted_after_it(
+    gate_harness: GateHarness,
+) -> None:
+    """The entry time staff set on the QR is enforced at the gate."""
+
+    assert gate_harness.token is not None
+    gate_harness.token.valid_from = NOW + timedelta(hours=1)
+    early = gate_harness.evaluate()
+    _assert_single_primary_denial(early, reason_code="TOKEN_NOT_YET_VALID")
+
+    gate_harness.token.valid_from = NOW - timedelta(minutes=1)
+    assert gate_harness.evaluate()["decision"] is GateDecision.GRANT
 
 
 def test_expired_token_is_the_primary_denial(
