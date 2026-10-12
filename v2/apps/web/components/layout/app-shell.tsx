@@ -143,8 +143,16 @@ function Sidebar({ onNavigate, onLogout }: SidebarProps) {
           <div className="rounded-xl border border-white/10 bg-white/[0.04] p-3.5">
             <p className="truncate text-sm font-semibold text-white">{user.display_name}</p>
             <p className="mt-1 text-xs text-slate-400">{roleLabel(user.role)}</p>
+            {user.handle.includes("@") ? (
+              <Link
+                className="mt-3 block rounded-lg px-3 py-1.5 text-center text-xs font-semibold text-slate-300 underline-offset-2 hover:underline"
+                href="/account"
+              >
+                Change password
+              </Link>
+            ) : null}
             <button
-              className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:bg-white/10"
+              className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:bg-white/10"
               onClick={onLogout}
               type="button"
             >
@@ -184,7 +192,11 @@ export function AppShell({ children }: AppShellProps) {
   const mobileNavigationCloseRef = useRef<HTMLButtonElement>(null);
   const isLoginRoute = pathname === "/login";
   const isInviteeRoute =
-    pathname === "/register" || pathname === "/set-password" || pathname.startsWith("/arrive/");
+    pathname === "/register" ||
+    pathname === "/set-password" ||
+    pathname === "/reset-password" ||
+    pathname === "/forgot-password" ||
+    pathname.startsWith("/arrive/");
 
   useEffect(() => {
     document.body.style.overflow = mobileOpen ? "hidden" : "";

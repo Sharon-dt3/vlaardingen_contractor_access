@@ -16,6 +16,8 @@ from app.services.audit import append_audit_event
 from app.services.workflows import WorkflowError
 
 INVITE_VALID_HOURS = 48
+RESET_VALID_HOURS = 1
+MAX_RESETS_PER_HOUR = 3
 MAX_FAILED_ATTEMPTS = 5
 LOCK_MINUTES = 15
 MIN_PASSWORD_LENGTH = 12
@@ -292,3 +294,112 @@ def check_sign_in(database: Session, *, handle: str, password: str, verify) -> t
     account.locked_until = None
     account.last_login_at = now
     return account, "ok"
+
+
+# PUBLIC_INTERFACE
+def request_reset(
+    database: Session, *, email: str, actor: UserAccount | None = None, force: bool = False
+) -> tuple[UserAccount, str] | None:
+    """Make a one-hour reset link for an active account that has an email.
+
+    Returns ``None`` (and does nothing) for any other address, and when three links were already
+    made for the account in the last hour. The caller must reply the same way either way, so
+    nobody can find out which emails belong to staff. ``force`` skips the hourly limit for an
+    administrator pressing the button.
+    """
+
+    account = database.scalar(select(UserAccount).where(func.lower(UserAccount.email) == email.strip().lower()))
+    if account is None or status_of(account) not in ("active", "locked"):
+        return None
+    if not force:
+        recent = database.scalar(
+            select(func.count()).select_from(AccountToken).where(
+                AccountToken.account_id == account.id,
+                AccountToken.kind == "reset",
+                AccountToken.created_at >= _now() - timedelta(hours=1),
+            )
+        )
+        if (recent or 0) >= MAX_RESETS_PER_HOUR:
+            return None
+    _spend_open_tokens(database, account.id, "reset")
+    secret = _new_token(database, account=account, kind="reset", actor=actor, hours=RESET_VALID_HOURS)
+    append_audit_event(
+        database,
+        actor=actor,
+        action="user.reset_sent" if actor else "auth.reset_requested",
+        entity_type="user_account",
+        entity_id=str(account.id),
+        reason="An administrator sent a password reset link." if actor else "A password reset link was requested.",
+        details={"email": account.email},
+    )
+    return account, secret
+
+
+# PUBLIC_INTERFACE
+def look_up_reset(database: Session, secret: str) -> UserAccount:
+    """The account an unused, unexpired reset link belongs to."""
+
+    token = _usable_token(database, secret, "reset")
+    account = database.get(UserAccount, token.account_id) if token else None
+    if account is None or status_of(account) not in ("active", "locked"):
+        raise WorkflowError(404, "This link has expired or was already used. Ask for a new one.")
+    return account
+
+
+def _set_new_password(account: UserAccount, password: str) -> None:
+    account.password_hash = hash_password(password)
+    account.password_changed_at = _now()
+    account.failed_attempts = 0
+    account.locked_until = None
+
+
+# PUBLIC_INTERFACE
+def complete_reset(database: Session, *, secret: str, password: str) -> UserAccount:
+    """Spend the reset link and set the new password. Every open session of the account ends."""
+
+    token = _usable_token(database, secret, "reset")
+    account = database.get(UserAccount, token.account_id) if token else None
+    if token is None or account is None or status_of(account) not in ("active", "locked"):
+        raise WorkflowError(404, "This link has expired or was already used. Ask for a new one.")
+    problem = password_problem(password, email=account.email or "")
+    if problem:
+        raise WorkflowError(422, problem)
+    _set_new_password(account, password)
+    token.used_at = _now()
+    append_audit_event(
+        database,
+        actor=None,
+        action="auth.password_reset",
+        entity_type="user_account",
+        entity_id=str(account.id),
+        reason="The person chose a new password from a reset link.",
+        details={"email": account.email},
+    )
+    return account
+
+
+# PUBLIC_INTERFACE
+def change_password(
+    database: Session, *, account: UserAccount, current: str, new: str, verify
+) -> UserAccount:
+    """A signed-in person changes their own password. Other open sessions end."""
+
+    if not verify(current, account.password_hash):
+        raise WorkflowError(422, "Your current password is not right.")
+    problem = password_problem(new, email=account.email or "")
+    if problem:
+        raise WorkflowError(422, problem)
+    if verify(new, account.password_hash):
+        raise WorkflowError(422, "Choose a password you have not used just now.")
+    _set_new_password(account, new)
+    _spend_open_tokens(database, account.id, "reset")
+    append_audit_event(
+        database,
+        actor=account,
+        action="auth.password_changed",
+        entity_type="user_account",
+        entity_id=str(account.id),
+        reason="The person changed their own password.",
+        details={"email": account.email},
+    )
+    return account

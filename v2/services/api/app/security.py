@@ -267,6 +267,14 @@ def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Session account is unavailable.",
         )
+    # A password change or reset ends every session that began before it.
+    if account.password_changed_at is not None and int(payload.get("iat", 0)) < int(
+        account.password_changed_at.timestamp()
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Your password was changed. Sign in again.",
+        )
     return account
 
 

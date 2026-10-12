@@ -371,3 +371,16 @@ Administrators now add the people who can sign in, from a new **Users** screen (
 - Migration `20261013_0023`: email, last sign-in, failed attempts, lock time and creator on `user_accounts`, and an `account_tokens` table.
 - Not built yet: forgot and reset password, change password, the authenticator code for administrators, idle sign-out, the gate
   operator's narrower menu, changing a role, and the first-admin setup command. The shared `admin.demo` account still exists.
+
+## Forgot password, reset and change password
+
+- **Forgot password** (`/forgot-password`): always answers "If that email belongs to an account, we have sent a link…", so it cannot be used
+  to find out who has an account. The lookup and the email happen after the reply. At most three links an hour per account.
+- **Reset link:** one hour, single use, a newer link replaces the older one. The reset page checks the password as the person
+  types. A weak password does not use up the link.
+- **Every open session ends** when the password is reset or changed (a session that began before the change is refused).
+- **Change password** (`/account`, "Change password" in the sidebar for people who sign in with an email): needs the current password,
+  keeps this browser signed in with a fresh session, signs other browsers out and emails a "your password was changed" notice.
+- **Send password reset** on the Users screen: the link goes to the person, never to the administrator. Audited as `user.reset_sent`.
+- Audit events: `auth.reset_requested`, `auth.password_reset`, `auth.password_changed`, `user.reset_sent`.
+- Tests: 218 pass in `tests/api` (one older null-byte filename test also fails on v1).

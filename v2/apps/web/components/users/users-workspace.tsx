@@ -73,12 +73,18 @@ export function UsersWorkspace() {
   });
 
   const act = useMutation({
-    mutationFn: (request: { id: string; action: "resend-invitation" | "deactivate" | "reactivate" }) =>
+    mutationFn: (request: { id: string; action: "resend-invitation" | "deactivate" | "reactivate" | "send-reset" }) =>
       apiRequest<InviteResult | Staff>(`/api/users/${request.id}/${request.action}`, { method: "POST" }),
     onSuccess: async (result, request) => {
       if (request.action === "resend-invitation") {
         const sent = (result as InviteResult).email_sent;
         setNotice(sent ? "A new invitation was emailed. The earlier link no longer works." : "The email could not be sent.");
+      } else if (request.action === "send-reset") {
+        setNotice(
+          (result as unknown as { email_sent: boolean }).email_sent
+            ? "A reset link was emailed to them. It works once and expires in 1 hour."
+            : "The reset email could not be sent."
+        );
       } else {
         setNotice(request.action === "deactivate" ? "The account was deactivated. Their sessions ended." : "The account was reactivated.");
       }
@@ -191,6 +197,16 @@ export function UsersWorkspace() {
                           type="button"
                         >
                           Resend invitation
+                        </button>
+                      ) : null}
+                      {(person.status === "active" || person.status === "locked") && person.email ? (
+                        <button
+                          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 disabled:opacity-50"
+                          disabled={act.isPending}
+                          onClick={() => act.mutate({ id: person.id, action: "send-reset" })}
+                          type="button"
+                        >
+                          Send password reset
                         </button>
                       ) : null}
                       {person.status === "active" || person.status === "locked" ? (

@@ -249,3 +249,138 @@ def test_the_public_link_pages(client: TestClient, database: Session) -> None:
     done = client.post("/auth/set-password", json={"token": secret, "password": GOOD})
     assert done.status_code == 204
     assert client.post("/auth/set-password", json={"token": secret, "password": GOOD}).status_code == 404
+
+
+# --- forgot password, reset and change -----------------------------------------
+
+import time
+from contextlib import contextmanager
+from types import SimpleNamespace
+
+from app.config import get_settings
+from app.services.accounts import (
+    MAX_RESETS_PER_HOUR,
+    change_password,
+    complete_reset,
+    look_up_reset,
+    request_reset,
+)
+
+NEW = "Another-strong-pass-77"
+
+
+def test_a_reset_link_is_made_only_for_a_real_active_account_and_is_limited(database: Session) -> None:
+    account, _ = _activate(database)
+    assert request_reset(database, email="nobody@example.com") is None
+    waiting, _secret = _invite(database)
+    assert request_reset(database, email=waiting.email) is None  # invited people use their invitation
+
+    first = request_reset(database, email=account.email.upper())
+    assert first is not None and first[0].id == account.id
+    token = database.scalar(select(AccountToken).where(AccountToken.token_hash == hash_token(first[1])))
+    assert token.kind == "reset" and token.expires_at - datetime.now(timezone.utc) <= timedelta(hours=1)
+    second = request_reset(database, email=account.email)
+    with pytest.raises(WorkflowError):
+        look_up_reset(database, first[1])  # a newer link replaced it
+    assert look_up_reset(database, second[1]).id == account.id
+    for _ in range(MAX_RESETS_PER_HOUR):
+        request_reset(database, email=account.email)
+    assert request_reset(database, email=account.email) is None  # the hourly limit
+    assert request_reset(database, email=account.email, actor=_admin(database), force=True) is not None
+
+
+def test_a_reset_sets_the_password_once_and_ends_older_sessions(client: TestClient, database: Session) -> None:
+    account, old_password = _activate(database)
+    account.failed_attempts = 3
+    database.flush()
+    _acc, secret = request_reset(database, email=account.email)
+    weak = None
+    with pytest.raises(WorkflowError) as weak:
+        complete_reset(database, secret=secret, password="short")
+    assert weak.value.status_code == 422 and look_up_reset(database, secret)  # a weak password keeps the link
+
+    logged_in = client.post("/auth/login", json={"handle": account.email, "password": old_password})
+    cookie = client.cookies.get(get_settings().session_cookie_name)
+    assert logged_in.status_code == 200 and client.get("/auth/me").status_code == 200
+    time.sleep(1.1)
+    complete_reset(database, secret=secret, password=NEW)
+    database.commit()
+    assert verify_password(NEW, account.password_hash) and account.failed_attempts == 0
+    with pytest.raises(WorkflowError):
+        complete_reset(database, secret=secret, password=NEW + "x")  # single use
+    client.cookies.set(get_settings().session_cookie_name, cookie)
+    assert client.get("/auth/me").status_code == 401  # the earlier session ended
+    assert client.post("/auth/login", json={"handle": account.email, "password": old_password}).status_code == 401
+    assert client.post("/auth/login", json={"handle": account.email, "password": NEW}).status_code == 200
+    assert database.scalar(select(AuditEvent).where(AuditEvent.action == "auth.password_reset", AuditEvent.entity_id == str(account.id)))
+
+
+def test_changing_your_own_password(client: TestClient, database: Session, monkeypatch) -> None:
+    account, password = _activate(database)
+    database.commit()
+    sent = []
+    monkeypatch.setattr(users_routes, "_send_changed_notice", lambda email, name: sent.append(email))
+    client.post("/auth/login", json={"handle": account.email, "password": password})
+    other_browser = client.cookies.get(get_settings().session_cookie_name)
+    time.sleep(1.1)
+
+    wrong = client.post("/auth/change-password", json={"current_password": "Not-my-password-1", "new_password": NEW})
+    assert wrong.status_code == 422 and "current password" in wrong.json()["detail"]
+    same = client.post("/auth/change-password", json={"current_password": password, "new_password": password})
+    assert same.status_code == 422
+    assert client.post("/auth/change-password", json={"current_password": password, "new_password": "weak"}).status_code == 422
+    done = client.post("/auth/change-password", json={"current_password": password, "new_password": NEW})
+    assert done.status_code == 204 and sent == [account.email]
+    assert client.get("/auth/me").status_code == 200  # this browser stays signed in
+    fresh = client.cookies.get(get_settings().session_cookie_name)
+    client.cookies.set(get_settings().session_cookie_name, other_browser)
+    assert client.get("/auth/me").status_code == 401  # any other browser is signed out
+    client.cookies.set(get_settings().session_cookie_name, fresh)
+    assert client.get("/auth/me").status_code == 200
+    assert database.scalar(select(AuditEvent).where(AuditEvent.action == "auth.password_changed", AuditEvent.entity_id == str(account.id)))
+
+
+def test_forgot_password_always_answers_the_same(client: TestClient, database: Session, monkeypatch) -> None:
+    account, _ = _activate(database)
+    database.commit()
+
+    @contextmanager
+    def _same_session():
+        yield database
+
+    monkeypatch.setattr("app.database.session.SessionLocal", _same_session)
+    sent = []
+    monkeypatch.setattr(users_routes, "_send_reset", lambda email, name, secret, admin: sent.append((email, admin)) or True)
+    known = client.post("/auth/forgot-password", json={"email": account.email})
+    unknown = client.post("/auth/forgot-password", json={"email": "nobody@example.com"})
+    assert known.status_code == unknown.status_code == 202 and known.json() == unknown.json()
+    assert sent == [(account.email, False)]  # only the real account got a link
+    assert client.post("/auth/forgot-password", json={"email": "not an email"}).status_code == 422
+
+
+def test_an_administrator_can_send_a_reset_but_never_sees_it(client: TestClient, database: Session, monkeypatch) -> None:
+    account, _ = _activate(database)
+    database.commit()
+    monkeypatch.setattr(users_routes, "_send_reset", lambda email, name, secret, admin: admin is True)
+    client.app.dependency_overrides[get_current_user] = lambda: account
+    assert client.post(f"/api/users/{account.id}/send-reset").status_code == 403
+    client.app.dependency_overrides[get_current_user] = lambda: _admin(database)
+    sent = client.post(f"/api/users/{account.id}/send-reset")
+    assert sent.status_code == 202 and sent.json() == {"email_sent": True}
+    assert database.scalar(select(AuditEvent).where(AuditEvent.action == "user.reset_sent", AuditEvent.entity_id == str(account.id)))
+    waiting, _secret = _invite(database)
+    database.commit()
+    assert client.post(f"/api/users/{waiting.id}/send-reset").status_code == 409
+    assert client.post(f"/api/users/{_admin(database).id}/send-reset").status_code == 404  # the demo account has no email
+
+
+def test_the_reset_link_pages(client: TestClient, database: Session) -> None:
+    account, _ = _activate(database)
+    _acc, secret = request_reset(database, email=account.email)
+    database.commit()
+    found = client.post("/auth/reset", json={"token": secret})
+    assert found.status_code == 200 and found.json()["email"] == account.email
+    assert client.post("/auth/reset", json={"token": "y" * 40}).status_code == 404
+    assert client.post("/auth/reset-password", json={"token": secret, "password": "weak"}).status_code == 422
+    assert client.post("/auth/reset-password", json={"token": secret, "password": NEW}).status_code == 204
+    assert client.post("/auth/reset-password", json={"token": secret, "password": NEW}).status_code == 404

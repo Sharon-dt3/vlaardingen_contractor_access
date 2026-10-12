@@ -2,6 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowRight, ShieldCheck, UserRoundCheck } from "lucide-react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect } from "react";
 import { useForm } from "react-hook-form";
@@ -168,6 +169,11 @@ export default function LoginPage() {
                   {form.formState.errors.password.message}
                 </p>
               ) : null}
+            </div>
+            <div className="text-right">
+              <Link className="text-xs font-semibold text-emerald-800 underline" href="/forgot-password">
+                Forgot password?
+              </Link>
             </div>
             {form.formState.errors.root ? (
               <div

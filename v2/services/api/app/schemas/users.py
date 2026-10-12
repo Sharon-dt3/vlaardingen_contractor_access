@@ -68,3 +68,16 @@ class SetPassword(BaseModel):
 
     token: str = Field(..., min_length=20, max_length=200)
     password: str = Field(..., min_length=1, max_length=256)
+
+
+class ForgotPassword(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: EmailStr
+
+
+class ChangePassword(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    current_password: str = Field(..., min_length=1, max_length=256)
+    new_password: str = Field(..., min_length=1, max_length=256)
