@@ -1,9 +1,9 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { ApiError, apiRequest } from "@/lib/api-client";
+import { ApiError, apiRequest, getApiBaseUrl } from "@/lib/api-client";
 import { enumLabel, formatDateTime, formatInSiteZone } from "@/lib/domain";
 import { GateQrScanner } from "@/components/workflows/gate-qr-scanner";
 import { WalkUpCameraScanner } from "@/components/workflows/walk-up-camera-scanner";
@@ -19,6 +19,73 @@ function qrTimeLeft(validFrom: string, validUntil: string): string {
   if (new Date(validUntil).getTime() <= now) return "expired";
   if (new Date(validFrom).getTime() > now) return `opens in ${describe(new Date(validFrom).getTime() - now)}`;
   return `${describe(new Date(validUntil).getTime() - now)} left`;
+}
+
+// The identity document the person uploaded, opened only when the officer asks, to compare with the person.
+function IdDocumentPanel({
+  siteKey,
+  registrationId,
+  expiry,
+  mediaType
+}: {
+  siteKey: string;
+  registrationId: string;
+  expiry: string | null | undefined;
+  mediaType: string | null | undefined;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => () => { if (url) URL.revokeObjectURL(url); }, [url]);
+
+  async function open() {
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/walk-up/gate/id-document`, {
+        method: "POST",
+        credentials: "include",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json", Accept: "*/*" },
+        body: JSON.stringify({ site_key: siteKey, registration_id: registrationId })
+      });
+      if (!response.ok) throw new Error("The document could not be opened.");
+      setUrl(URL.createObjectURL(await response.blob()));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "The document could not be opened.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2 rounded-lg border bg-white p-3">
+      <p className="text-sm font-semibold text-slate-900">
+        Identity document · expires {expiry ?? "date not given"}
+      </p>
+      {url ? (
+        mediaType === "application/pdf" ? (
+          <a className="text-sm font-semibold text-emerald-800 underline" href={url} rel="noreferrer" target="_blank">
+            Open the PDF
+          </a>
+        ) : (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img alt="Identity document uploaded by the person" className="max-h-72 w-auto rounded border" src={url} />
+        )
+      ) : (
+        <button
+          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-900 disabled:opacity-50"
+          disabled={busy}
+          onClick={() => void open()}
+          type="button"
+        >
+          {busy ? "Opening" : "Open the document to compare"}
+        </button>
+      )}
+      {error ? <p className="text-sm text-red-700">{error}</p> : null}
+      <p className="text-xs text-slate-600">Each time it is opened is recorded in the audit trail.</p>
+    </div>
+  );
 }
 
 type SiteLink = { site_key: string; site_name: string };
@@ -42,6 +109,10 @@ type Arrival = {
   admitted_at: string | null;
   admitted_by: string | null;
   email_verified: boolean;
+  id_uploaded?: boolean;
+  id_expiry_date?: string | null;
+  id_media_type?: string | null;
+  id_filename?: string | null;
   exited_at: string | null;
   refusal_count: number;
   last_refused_at: string | null;
@@ -327,6 +398,19 @@ export function WalkUpGateCheck() {
               ? "Email: verified with a code"
               : "Email: not verified (registered without the email check)"}
           </p>
+
+          {arrival.id_uploaded ? (
+            <IdDocumentPanel
+              expiry={arrival.id_expiry_date}
+              mediaType={arrival.id_media_type}
+              registrationId={arrival.registration_id}
+              siteKey={site.site_key}
+            />
+          ) : (
+            <p className="text-sm font-semibold text-amber-800">
+              No identity document was uploaded for this registration.
+            </p>
+          )}
 
           {arrival.reasons.length > 0 ? (
             <ul className="list-disc space-y-1 pl-5 text-sm text-red-800">

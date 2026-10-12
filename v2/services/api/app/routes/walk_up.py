@@ -5,11 +5,24 @@ from __future__ import annotations
 import uuid
 from io import BytesIO
 import logging
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Annotated, Union
 
 import qrcode
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -37,9 +50,11 @@ from app.schemas.walk_up import (
     WalkUpVerificationRequired,
     WalkUpVerifyRequest,
 )
+from app.providers import DocumentExtractionProvider, StorageProvider, get_document_extraction_provider, get_storage_provider
 from app.security import require_permissions
 from app.services.walk_up import (
     CODE_VALID_MINUTES,
+    MAX_ID_UPLOAD_BYTES,
     RESEND_COOLDOWN_SECONDS,
     admit_at_gate,
     active_sites,
@@ -52,6 +67,8 @@ from app.services.walk_up import (
     verify_email_code,
     lookup_for_gate,
     pass_qr_data_url,
+    read_id_document,
+    store_id_document,
     pass_qr_png,
     list_registrations,
     reference_for,
@@ -67,6 +84,12 @@ _LOGGER = logging.getLogger(__name__)
 # Many contractors can share one guest Wi-Fi address, so the limit is generous.
 _registration_limiter = RateLimiter(limit=30, window_seconds=600)
 _verify_limiter = RateLimiter(limit=60, window_seconds=600)
+
+
+def id_document_required() -> bool:
+    """Whether a walk-up person must upload an identity document and its expiry date."""
+
+    return get_settings().walk_up_id_document.strip().lower() != "off"
 
 
 def email_check_enabled() -> bool:
@@ -159,7 +182,9 @@ def get_walk_up_site(
         site = site_for_key(database, key)
     except WorkflowError as error:
         _raise_api_error(error)
-    return WalkUpSiteResponse(site_key=site_key(site), site_name=site.name)
+    return WalkUpSiteResponse(
+        site_key=site_key(site), site_name=site.name, id_document_required=id_document_required()
+    )
 
 
 # PUBLIC_INTERFACE
@@ -221,14 +246,38 @@ def post_walk_up_registration(
     request: Request,
     response: Response,
     database: Annotated[Session, Depends(get_db)],
+    storage: Annotated[StorageProvider, Depends(get_storage_provider)],
 ) -> Union[WalkUpRegistrationReceipt, WalkUpVerificationRequired]:
-    """Record an arrival, or start its email check."""
+    """Record an arrival, or start its email check. Not available while a document is required."""
 
+    if id_document_required():
+        raise HTTPException(
+            status_code=422,
+            detail="An identity document and its expiry date are required. Use the registration page.",
+        )
     response.headers["Cache-Control"] = "no-store"
+    _check_registration_rate(request)
+    return _register(payload, None, request, response, database, storage)
+
+
+def _check_registration_rate(request: Request) -> None:
     if not _registration_limiter.allow(_client_key(request)):
         raise HTTPException(
             status_code=429, detail="Too many registrations from this connection. Try again shortly."
         )
+
+
+def _register(
+    payload: WalkUpRegistrationCreate,
+    id_document: dict | None,
+    request: Request,
+    response: Response,
+    database: Session,
+    storage: StorageProvider,
+) -> Union[WalkUpRegistrationReceipt, WalkUpVerificationRequired]:
+    """Shared by both registration routes."""
+
+    response.headers["Cache-Control"] = "no-store"
     fields = dict(
         site_key_value=payload.site_key,
         first_name=payload.first_name,
@@ -248,7 +297,9 @@ def post_walk_up_registration(
                     status_code=503,
                     detail="The email check is switched on, but no mail server is set up. Ask site staff for help.",
                 )
-            pending, code, site = start_email_check(database, **fields)
+            pending, code, site = start_email_check(
+                database, **fields, id_document=id_document, storage=storage
+            )
             try:
                 send_walk_up_code_email(
                     settings,
@@ -272,7 +323,7 @@ def post_walk_up_registration(
             response.status_code = status.HTTP_202_ACCEPTED
             return outcome
 
-        registration, site, rules, acknowledgement, pass_secret = register_walk_up(database, **fields)
+        registration, site, rules, acknowledgement, pass_secret = register_walk_up(database, **fields, id_document=id_document)
         receipt = WalkUpRegistrationReceipt(
             reference=reference_for(registration.id),
             site_name=site.name,
@@ -294,6 +345,89 @@ def post_walk_up_registration(
     except Exception:
         database.rollback()
         raise
+
+
+# PUBLIC_INTERFACE
+@router.post(
+    "/registrations/with-document",
+    response_model=Union[WalkUpRegistrationReceipt, WalkUpVerificationRequired],
+    status_code=status.HTTP_201_CREATED,
+    operation_id="register_walk_up_with_document",
+    summary="Register on arrival with an identity document and the life-saving confirmation",
+    description=(
+        "Public: the same as /registrations, plus a photo or scan of the person's identity "
+        "document and the expiry date they typed. The file is stored privately and shown only to "
+        "a gate officer. With the email check on this returns 202 and emails a code."
+    ),
+    responses={
+        202: {"model": WalkUpVerificationRequired, "description": "A code was emailed."},
+        404: {"description": "Unknown site or rules version."},
+        413: {"description": "The document is larger than 5 MB."},
+        422: {"description": "A field or the document is invalid, or the box was not ticked."},
+        429: {"description": "Too many registrations from this address."},
+        503: {"description": "The code could not be sent, or real documents are not accepted."},
+    },
+)
+async def post_walk_up_registration_with_document(
+    request: Request,
+    response: Response,
+    database: Annotated[Session, Depends(get_db)],
+    storage: Annotated[StorageProvider, Depends(get_storage_provider)],
+    parser: Annotated[DocumentExtractionProvider, Depends(get_document_extraction_provider)],
+    site_key_value: Annotated[str, Form(alias="site_key")],
+    first_name: Annotated[str, Form()],
+    last_name: Annotated[str, Form()],
+    company_name: Annotated[str, Form()],
+    email: Annotated[str, Form()],
+    rules_version_id: Annotated[str, Form()],
+    language: Annotated[str, Form()],
+    confirmed: Annotated[bool, Form()],
+    expiry_date: Annotated[str, Form(description="ID expiry date as YYYY-MM-DD.")],
+    file: Annotated[UploadFile, File(description="Photo or scan of the identity document.")],
+    population: Annotated[str, Form()] = "maintenance_contractor",
+    website: Annotated[str, Form()] = "",
+) -> Union[WalkUpRegistrationReceipt, WalkUpVerificationRequired]:
+    """Validate the fields and the document, store the document, then register as usual."""
+
+    response.headers["Cache-Control"] = "no-store"
+    _check_registration_rate(request)
+    try:
+        payload = WalkUpRegistrationCreate(
+            site_key=site_key_value,
+            first_name=first_name,
+            last_name=last_name,
+            company_name=company_name,
+            email=email,
+            population=population,
+            rules_version_id=rules_version_id,
+            language=language,
+            confirmed=confirmed,
+            website=website,
+        )
+        expires_on = date.fromisoformat(expiry_date.strip())
+    except (ValidationError, ValueError) as error:
+        raise HTTPException(
+            status_code=422,
+            detail="Check your details and enter the document's expiry date (year-month-day).",
+        ) from error
+    content = await file.read(MAX_ID_UPLOAD_BYTES + 1)
+    await file.close()
+    try:
+        site = site_for_key(database, payload.site_key)
+        id_document = store_id_document(
+            database,
+            storage,
+            site=site,
+            filename=file.filename or "",
+            media_type=file.content_type or "application/octet-stream",
+            content=content,
+            expiry_date=expires_on,
+            allow_real_document=getattr(parser, "reads_real_documents", False),
+        )
+    except WorkflowError as error:
+        database.rollback()
+        _raise_api_error(error)
+    return _register(payload, id_document, request, response, database, storage)
 
 
 # PUBLIC_INTERFACE
@@ -321,6 +455,7 @@ def post_walk_up_verify(
     response: Response,
     background: BackgroundTasks,
     database: Annotated[Session, Depends(get_db)],
+    storage: Annotated[StorageProvider, Depends(get_storage_provider)],
 ) -> WalkUpRegistrationReceipt:
     """Finish a registration with its email code, then email the entry QR."""
 
@@ -329,7 +464,7 @@ def post_walk_up_verify(
         raise HTTPException(status_code=429, detail="Too many attempts. Try again shortly.")
     try:
         registration, site, rules, acknowledgement, pass_secret = verify_email_code(
-            database, pending_id=payload.pending_id, code=payload.code
+            database, pending_id=payload.pending_id, code=payload.code, storage=storage
         )
         reference = reference_for(registration.id)
         person = database.get(Person, registration.person_id)
@@ -623,3 +758,48 @@ def post_walk_up_gate_refuse(
     except Exception:
         database.rollback()
         raise
+
+
+# PUBLIC_INTERFACE
+@router.post(
+    "/gate/id-document",
+    operation_id="preview_walk_up_id_document",
+    summary="Open the identity document a walk-up person uploaded",
+    description=(
+        "For gate staff only: returns the private file so the officer can compare it with the "
+        "person. It is never cached, and each viewing is recorded in the audit trail."
+    ),
+    responses={
+        200: {"content": {"image/png": {}, "image/jpeg": {}, "application/pdf": {}}},
+        404: {"description": "No document is available."},
+    },
+)
+def post_walk_up_id_document(
+    payload: GateExitRequest,
+    actor: Annotated[UserAccount, Depends(require_permissions("gate:evaluate"))],
+    database: Annotated[Session, Depends(get_db)],
+    storage: Annotated[StorageProvider, Depends(get_storage_provider)],
+) -> Response:
+    """Return the uploaded document bytes for comparison at the kiosk."""
+
+    try:
+        filename, media_type, content = read_id_document(
+            database,
+            actor=actor,
+            site_key_value=payload.site_key,
+            registration_id=payload.registration_id,
+            storage=storage,
+        )
+        database.commit()
+    except WorkflowError as error:
+        database.rollback()
+        _raise_api_error(error)
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Disposition": "inline",
+        },
+    )

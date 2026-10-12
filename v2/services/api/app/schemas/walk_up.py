@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
@@ -31,6 +31,7 @@ class WalkUpSiteResponse(BaseModel):
 
     site_key: str
     site_name: str
+    id_document_required: bool = False
 
 
 class WalkUpSiteLinkResponse(WalkUpSiteResponse):
@@ -103,6 +104,8 @@ class WalkUpRegistrationRow(BaseModel):
     admitted_at: datetime | None = None
     exited_at: datetime | None = None
     email_verified: bool = False
+    id_uploaded: bool = False
+    id_expiry_date: date | None = None
     refusal_count: int = 0
     last_refused_at: datetime | None = None
 
@@ -153,6 +156,10 @@ class GateWalkUpResponse(BaseModel):
     admitted_at: datetime | None
     admitted_by: str | None
     email_verified: bool
+    id_uploaded: bool = False
+    id_expiry_date: date | None = None
+    id_media_type: str | None = None
+    id_filename: str | None = None
     exited_at: datetime | None
     refusal_count: int
     last_refused_at: datetime | None

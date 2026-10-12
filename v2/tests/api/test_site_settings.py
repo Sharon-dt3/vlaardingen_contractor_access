@@ -234,6 +234,7 @@ def test_the_walk_up_receipt_carries_the_site_time_zone(database: Session) -> No
 
     with _pytest.MonkeyPatch.context() as patch:
         patch.setattr(walk_up_routes, "email_check_enabled", lambda: False)
+        patch.setattr(walk_up_routes, "id_document_required", lambda: False)
         rules = get_current_rules(database)
         receipt = TestClient(app).post(
             "/api/walk-up/registrations",

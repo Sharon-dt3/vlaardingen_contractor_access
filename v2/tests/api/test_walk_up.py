@@ -38,6 +38,7 @@ from app.services.walk_up import (
     admit_at_gate,
     email_hint,
     refuse_at_gate,
+    reference_for,
     list_on_site,
     lookup_for_gate,
     record_exit,
@@ -217,6 +218,7 @@ def client(database: Session, monkeypatch):
     walk_up_routes._registration_limiter.reset()
     walk_up_routes._verify_limiter.reset()
     monkeypatch.setattr(walk_up_routes, "email_check_enabled", lambda: False)
+    monkeypatch.setattr(walk_up_routes, "id_document_required", lambda: False)
     return TestClient(app)
 
 
@@ -233,7 +235,7 @@ def _body(database: Session, **overrides):
 
 def test_api_site_lookup_and_qr_image(client: TestClient) -> None:
     ok = client.get("/api/walk-up/sites/vlaardingen")
-    assert ok.status_code == 200 and ok.json() == {"site_key": "vlaardingen", "site_name": "Vlaardingen"}
+    assert ok.status_code == 200 and ok.json() == {"site_key": "vlaardingen", "site_name": "Vlaardingen", "id_document_required": False}
     assert client.get("/api/walk-up/sites/nowhere").status_code == 404
     image = client.get("/api/walk-up/qr.png", params={"site": "vlaardingen"})
     assert image.status_code == 200 and image.headers["content-type"] == "image/png"
@@ -648,7 +650,7 @@ def checked_client(database: Session, monkeypatch):
     monkeypatch.setattr(walk_up_routes, "email_check_enabled", lambda: True)
     monkeypatch.setattr(walk_up_routes, "send_walk_up_pass_email", lambda settings, **kw: passes.append(kw))
     monkeypatch.setattr(
-        walk_up_routes, "get_settings", lambda: SimpleNamespace(notification_provider="smtp", web_origin="http://x")
+        walk_up_routes, "get_settings", lambda: SimpleNamespace(notification_provider="smtp", web_origin="http://x", walk_up_id_document="off")
     )
     monkeypatch.setattr(walk_up_routes, "send_walk_up_code_email", lambda settings, **kw: sent.append(kw))
     client = TestClient(app)
@@ -701,7 +703,7 @@ def test_api_resend_is_throttled(checked_client: TestClient, database: Session) 
 def test_api_email_check_needs_a_mail_server(checked_client: TestClient, database: Session, monkeypatch) -> None:
     from types import SimpleNamespace
 
-    monkeypatch.setattr(walk_up_routes, "get_settings", lambda: SimpleNamespace(notification_provider="mock"))
+    monkeypatch.setattr(walk_up_routes, "get_settings", lambda: SimpleNamespace(notification_provider="mock", walk_up_id_document="off"))
     refused = checked_client.post("/api/walk-up/registrations", json=_body(database))
     assert refused.status_code == 503 and "mail server" in refused.json()["detail"]
 
@@ -1210,3 +1212,171 @@ def test_an_invited_person_still_inside_after_their_visit_ended_is_not_lost(data
     assert not {row["visit_id"] for row in ended} & live  # never both lists
     flagged = [row for row in snapshot["current_presence"] if row.get("visit_id") in {r["visit_id"] for r in ended}]
     assert len(flagged) == len(ended) and all(row["overdue"] for row in flagged)
+
+
+# --- identity document --------------------------------------------------------
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"DEMO IDENTITY CARD NOT A REAL CREDENTIAL" * 4
+
+
+@pytest.fixture()
+def storage(tmp_path):
+    from app.providers.storage import LocalStorage
+
+    return LocalStorage(str(tmp_path / "private"))
+
+
+def _site(database: Session):
+    from app.services.walk_up import site_for_key
+
+    return site_for_key(database, "vlaardingen")
+
+
+def _store(database: Session, storage, **overrides):
+    from datetime import date
+
+    from app.services.walk_up import store_id_document
+
+    values = dict(
+        site=_site(database), filename="id.png", media_type="image/png", content=PNG,
+        expiry_date=date.today() + timedelta(days=400), allow_real_document=False,
+    )
+    values.update(overrides)
+    return store_id_document(database, storage, **values)
+
+
+def test_the_document_rules(database: Session, storage) -> None:
+    from datetime import date
+
+    stored = _store(database, storage)
+    assert stored["id_filename"] == "id.png" and stored["id_storage_reference"].startswith("objects/")
+    assert storage.get(stored["id_storage_reference"]) == PNG
+    cases = [
+        (dict(filename="../id.png"), 422),
+        (dict(filename="id.exe", media_type="application/octet-stream"), 422),
+        (dict(media_type="image/jpeg"), 422),  # label does not match the extension
+        (dict(content=b"not a png at all DEMO"), 422),  # does not look like an image
+        (dict(content=PNG + b"x" * (5 * 1024 * 1024)), 413),
+        (dict(content=b""), 413),
+        (dict(expiry_date=date.today() - timedelta(days=1)), 422),
+        (dict(expiry_date=date.today() + timedelta(days=366 * 30)), 422),
+        (dict(content=b"\x89PNG\r\n\x1a\n" + b"a real looking card"), 503),  # real document, no reader
+    ]
+    for overrides, expected in cases:
+        with pytest.raises(WorkflowError) as error:
+            _store(database, storage, **overrides)
+        assert error.value.status_code == expected, overrides
+    # A real document is accepted once the reader is configured.
+    assert _store(database, storage, content=b"\x89PNG\r\n\x1a\n" + b"a real looking card", allow_real_document=True)
+
+
+@pytest.fixture()
+def document_client(database: Session, monkeypatch, storage):
+    from app.providers import get_document_extraction_provider, get_storage_provider
+    from types import SimpleNamespace
+
+    app = FastAPI()
+    app.include_router(walk_up_routes.router)
+    app.dependency_overrides[get_db] = lambda: database
+    app.dependency_overrides[get_storage_provider] = lambda: storage
+    app.dependency_overrides[get_document_extraction_provider] = lambda: SimpleNamespace(reads_real_documents=False)
+    walk_up_routes._registration_limiter.reset()
+    walk_up_routes._verify_limiter.reset()
+    monkeypatch.setattr(walk_up_routes, "email_check_enabled", lambda: False)
+    monkeypatch.setattr(walk_up_routes, "id_document_required", lambda: True)
+    return TestClient(app)
+
+
+def _form(database: Session, **overrides):
+    rules = get_current_rules(database)
+    values = {
+        "site_key": "vlaardingen", "first_name": "Ida", "last_name": "Documenta", "company_name": "Document B.V.",
+        "email": f"ida.{uuid.uuid4().hex[:6]}@example.com", "population": "visitor",
+        "rules_version_id": str(rules.id), "language": "en", "confirmed": "true",
+        "expiry_date": (datetime.now(timezone.utc) + timedelta(days=500)).date().isoformat(),
+    }
+    values.update(overrides)
+    return values
+
+
+def _post_form(client, database, files=None, **overrides):
+    files = files if files is not None else {"file": ("id.png", PNG, "image/png")}
+    return client.post("/api/walk-up/registrations/with-document", data=_form(database, **overrides), files=files)
+
+
+def test_a_document_is_required_and_only_the_upload_route_registers(document_client, database: Session) -> None:
+    assert document_client.get("/api/walk-up/sites/vlaardingen").json()["id_document_required"] is True
+    body = _body(database)
+    assert document_client.post("/api/walk-up/registrations", json=body).status_code == 422
+    assert _post_form(document_client, database, files={}).status_code == 422
+    assert _post_form(document_client, database, expiry_date="soon").status_code == 422
+    assert _post_form(document_client, database, expiry_date="2020-01-01").status_code == 422
+    assert _post_form(document_client, database, files={"file": ("id.exe", PNG, "application/octet-stream")}).status_code == 422
+    assert _post_form(document_client, database, website="spam").status_code == 422
+    assert database.scalar(select(func.count()).select_from(WalkUpRegistration).where(WalkUpRegistration.id_filename == "id.png")) == 0
+
+
+def test_the_officer_sees_the_document_and_its_expiry_and_each_viewing_is_audited(
+    document_client, database: Session, storage
+) -> None:
+    from app.security import get_current_user
+
+    expiry = (datetime.now(timezone.utc) + timedelta(days=500)).date()
+    created = _post_form(document_client, database, expiry_date=expiry.isoformat())
+    assert created.status_code == 201, created.text
+    database.commit()
+    registration = database.scalar(select(WalkUpRegistration).order_by(WalkUpRegistration.registered_at.desc()))
+    assert registration.id_expiry_date == expiry and storage.get(registration.id_storage_reference) == PNG
+
+    document_client.app.dependency_overrides[get_current_user] = lambda: _admin(database)
+    found = document_client.post(
+        "/api/walk-up/gate/lookup", json={"site_key": "vlaardingen", "code": created.json()["reference"]}
+    ).json()
+    assert found["id_uploaded"] is True and found["id_expiry_date"] == expiry.isoformat()
+    assert found["id_media_type"] == "image/png" and found["eligible"] is True
+
+    body = {"site_key": "vlaardingen", "registration_id": found["registration_id"]}
+    viewed = document_client.post("/api/walk-up/gate/id-document", json=body)
+    assert viewed.status_code == 200 and viewed.content == PNG and viewed.headers["content-type"] == "image/png"
+    assert "no-store" in viewed.headers["cache-control"] and viewed.headers["x-content-type-options"] == "nosniff"
+    events = database.scalars(select(AuditEvent).where(AuditEvent.action == "walk_up.id_viewed")).all()
+    assert len(events) >= 1 and events[-1].details["reference"] == created.json()["reference"]
+    assert document_client.post("/api/walk-up/gate/id-document", json={**body, "site_key": "nowhere"}).status_code == 404
+
+
+def test_an_expired_document_stops_entry_at_the_kiosk(database: Session, storage) -> None:
+    registration, *_ = register_walk_up(database, **_details(database, email="old.id@example.com"), id_document=_store(database, storage))
+    admin = _admin(database)
+    assert lookup_for_gate(database, actor=admin, site_key_value="vlaardingen", code=reference_for(registration.id))["eligible"] is True
+    registration.id_expiry_date = datetime.now(timezone.utc).date() - timedelta(days=1)
+    database.flush()
+    found = lookup_for_gate(database, actor=admin, site_key_value="vlaardingen", code=reference_for(registration.id))
+    assert found["eligible"] is False and [r["code"] for r in found["reasons"]] == ["ID_EXPIRED"]
+    with pytest.raises(WorkflowError) as refused:
+        admit_at_gate(database, actor=admin, site_key_value="vlaardingen", registration_id=registration.id)
+    assert refused.value.status_code == 409 and "expired" in refused.value.detail
+
+
+def test_the_document_follows_the_email_check_and_an_abandoned_one_is_removed(database: Session, storage) -> None:
+    document = _store(database, storage)
+    pending, code, _site_row = start_email_check(
+        database, site_key_value="vlaardingen", first_name="Pia", last_name="Pending", company_name="Pending B.V.",
+        email="pia@example.com", population="visitor", rules_version_id=get_current_rules(database).id,
+        language="en", confirmed=True, id_document=document, storage=storage,
+    )
+    registration, *_ = verify_email_code(database, pending_id=pending.id, code=code, storage=storage)
+    assert registration.id_storage_reference == document["id_storage_reference"]
+    assert registration.id_expiry_date == document["id_expiry_date"]
+    assert storage.get(document["id_storage_reference"]) == PNG  # kept: the registration uses it
+
+    lonely = _store(database, storage, content=PNG + b"another document")
+    pending2, code2, _ = start_email_check(
+        database, site_key_value="vlaardingen", first_name="Max", last_name="Wrong", company_name="Wrong B.V.",
+        email="max@example.com", population="visitor", rules_version_id=get_current_rules(database).id,
+        language="en", confirmed=True, id_document=lonely, storage=storage,
+    )
+    for _ in range(5):
+        with pytest.raises(WorkflowError):
+            verify_email_code(database, pending_id=pending2.id, code="000000" if code2 != "000000" else "111111", storage=storage)
+    with pytest.raises(Exception):
+        storage.get(lonely["id_storage_reference"])  # too many wrong codes: the file is gone

@@ -331,3 +331,22 @@ own time, so the same moment read differently on different screens.
 - The zone can be changed with `NEXT_PUBLIC_SITE_TIME_ZONE`. New code: `apps/web/lib/time.ts`.
 - Fixed in the same pass: the QR form kept the previous visit's dates when another visit was chosen.
 - The web build folder is now `apps/web/.next.nosync` (with `.next` linked to it) so iCloud does not sync it.
+
+## Identity document for unexpected (walk-up) arrivals
+
+The registration form now asks for a photo or scan of the person's ID card or driving licence (PNG, JPG or PDF, up to 5 MB)
+and the expiry date printed on it, next to name, company, email and category.
+
+- **Preview:** the person sees the file they chose, and can open a PDF, before they submit.
+- **Checks on upload:** file type and a real image or PDF signature, size, safe file name, expiry date not in the past and not
+  more than 25 years ahead. A document that is not marked as a demo needs the ID reader to be configured, as in the planned path.
+- **Stored privately** like other evidence, held with the pending registration until the email code is entered, then kept on the
+  registration. An abandoned registration's file is removed. Erasing a person removes their document unless another record
+  uses the identical file.
+- **At the kiosk:** the officer sees "Identity document, expires …" and an "Open the document to compare" button. Each opening is
+  recorded in the audit trail (`walk_up.id_viewed`). A document that has expired since registering stops entry (`ID_EXPIRED`).
+- **Staff list:** the Walk-up arrivals page has an "ID document" column.
+- **Switch:** `WALK_UP_ID_DOCUMENT=off` in `.env` turns the requirement off (the form then hides the section). Default is on.
+- New endpoints: `POST /api/walk-up/registrations/with-document` (public), `POST /api/walk-up/gate/id-document` (gate staff).
+  The older JSON registration route refuses while the document is required.
+- Migration `20261013_0022`. Tests: 201 pass in `tests/api`.

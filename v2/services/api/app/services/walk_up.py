@@ -14,8 +14,9 @@ import hashlib
 import re
 import secrets
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from io import BytesIO
+from pathlib import PurePath
 from typing import Any
 
 import qrcode
@@ -38,6 +39,7 @@ from app.models import (
     WalkUpPending,
     WalkUpRegistration,
 )
+from app.providers.storage import StorageProvider, lock_private_reference, put_private_reference
 from app.services.audit import append_audit_event
 from app.services.batch3 import _is_blacklisted
 from app.services.life_saving import content_sha256, pick_translation, status_for_people
@@ -47,6 +49,7 @@ from app.services.workflows import WorkflowError
 CONFIRMATION_METHOD_WALK_UP = "walk_up_qr"
 PERSON_SOURCE = "walk_up_qr"
 # How long a registration can be presented at the kiosk. A new day needs a new registration.
+MAX_ID_UPLOAD_BYTES = 5 * 1024 * 1024
 PASS_VALID_HOURS = 12  # fallback for a registration that has no stored expiry
 PASS_PREFIX = "renewi-walkup:"
 # The email check: a six-digit code, valid for a few minutes, with limited tries and resends.
@@ -214,6 +217,73 @@ def _validated_arrival(
     return site, rules
 
 
+ID_UPLOAD_TYPES: dict[str, frozenset[str]] = {
+    ".png": frozenset({"image/png"}),
+    ".jpg": frozenset({"image/jpeg"}),
+    ".jpeg": frozenset({"image/jpeg"}),
+    ".pdf": frozenset({"application/pdf"}),
+}
+_ID_MAGIC = {".png": b"\x89PNG\r\n\x1a\n", ".jpg": b"\xff\xd8\xff", ".jpeg": b"\xff\xd8\xff", ".pdf": b"%PDF"}
+_SYNTHETIC_MARKERS = (b"DEMO", b"NOT A REAL CREDENTIAL")
+MAX_ID_YEARS_AHEAD = 25
+
+
+# PUBLIC_INTERFACE
+def store_id_document(
+    database: Session,
+    storage: StorageProvider,
+    *,
+    site: Site,
+    filename: str,
+    media_type: str,
+    content: bytes,
+    expiry_date: date,
+    allow_real_document: bool,
+) -> dict[str, Any]:
+    """Check an uploaded identity document and its expiry date, then store it privately.
+
+    Returns the column values to keep on the pending registration or the registration.
+    Nothing is read from the document; the person's typed expiry date is what is recorded,
+    and the gate officer compares it with the document and the person.
+    """
+
+    safe_name = PurePath(filename).name
+    suffix = PurePath(safe_name).suffix.lower()
+    if (
+        not safe_name
+        or safe_name != filename
+        or len(filename) > 180
+        or any(ord(character) < 32 or ord(character) == 127 for character in filename)
+    ):
+        raise WorkflowError(422, "The document's file name is not valid.")
+    if suffix not in ID_UPLOAD_TYPES or media_type not in ID_UPLOAD_TYPES[suffix]:
+        raise WorkflowError(422, "Upload a photo or scan of the document as a PNG, JPG or PDF file.")
+    if not content or len(content) > MAX_ID_UPLOAD_BYTES:
+        raise WorkflowError(413, "The document must be smaller than 5 MB.")
+    if not content.startswith(_ID_MAGIC[suffix]):
+        raise WorkflowError(422, "That file does not look like a real image or PDF. Choose the photo or scan again.")
+    today = datetime.now(ZoneInfo(site.timezone)).date()
+    if expiry_date < today:
+        raise WorkflowError(422, "That document has expired. Use a document that is still valid.")
+    if expiry_date > today.replace(year=today.year + MAX_ID_YEARS_AHEAD):
+        raise WorkflowError(422, "Check the expiry date. It is too far in the future.")
+    is_synthetic = any(marker in content[:65536].upper() for marker in _SYNTHETIC_MARKERS)
+    if not is_synthetic and not allow_real_document:
+        raise WorkflowError(
+            503, "Real identity documents cannot be accepted by this service yet. Ask site staff for help."
+        )
+    stored = put_private_reference(database, storage, content)
+    return {
+        "id_filename": safe_name,
+        "id_media_type": media_type,
+        "id_size_bytes": stored.size_bytes,
+        "id_sha256": stored.sha256,
+        "id_storage_reference": stored.reference,
+        "id_storage_mode": stored.mode,
+        "id_expiry_date": expiry_date,
+    }
+
+
 # PUBLIC_INTERFACE
 def register_walk_up(
     database: Session,
@@ -228,6 +298,7 @@ def register_walk_up(
     language: str,
     confirmed: bool,
     email_verified_at: datetime | None = None,
+    id_document: dict[str, Any] | None = None,
 ) -> tuple[
     WalkUpRegistration, Site, LifeSavingRulesVersion, LifeSavingRulesAcknowledgement, str
 ]:
@@ -311,6 +382,7 @@ def register_walk_up(
         pass_hash=_hash_pass(pass_secret),
         pass_valid_from=pass_opens_at,
         pass_expires_at=pass_opens_at + timedelta(hours=settings.walk_up_pass_hours),
+        **(id_document or {}),
         email_verified_at=email_verified_at,
     )
     database.add(registration)
@@ -398,6 +470,8 @@ def list_registrations(
                 "admitted_at": registration.admitted_at,
                 "exited_at": registration.exited_at,
                 "email_verified": registration.email_verified_at is not None,
+                "id_uploaded": registration.id_storage_reference is not None,
+                "id_expiry_date": registration.id_expiry_date,
                 "refusal_count": refused.get(str(registration.id), (0, None))[0],
                 "last_refused_at": refused.get(str(registration.id), (0, None))[1],
             }
@@ -474,6 +548,14 @@ def _entry_state(database: Session, registration: WalkUpRegistration) -> dict[st
         reasons.append({"code": "PERSON_NOT_ACTIVE", "message": "This person is not allowed on site."})
     if _is_blacklisted(database, person=person, evaluated_at=now):
         reasons.append({"code": "BLACKLISTED", "message": "This person or their company is blacklisted."})
+    today = datetime.now(ZoneInfo(site.timezone)).date()
+    if registration.id_expiry_date is not None and registration.id_expiry_date < today:
+        reasons.append(
+            {
+                "code": "ID_EXPIRED",
+                "message": f"Their identity document expired on {registration.id_expiry_date.isoformat()}.",
+            }
+        )
     opens_at = registration.pass_valid_from or registration.registered_at
     if opens_at > now and registration.admitted_at is None:
         reasons.append(
@@ -516,6 +598,10 @@ def _entry_state(database: Session, registration: WalkUpRegistration) -> dict[st
         "admitted_at": registration.admitted_at,
         "admitted_by": admitted_by,
         "email_verified": registration.email_verified_at is not None,
+        "id_uploaded": registration.id_storage_reference is not None,
+        "id_expiry_date": registration.id_expiry_date,
+        "id_media_type": registration.id_media_type,
+        "id_filename": registration.id_filename,
         "exited_at": registration.exited_at,
         "refusal_count": refusals[0],
         "last_refused_at": refusals[1],
@@ -629,6 +715,45 @@ def _record_lookup(
         },
     )
     return True
+
+
+# PUBLIC_INTERFACE
+def read_id_document(
+    database: Session,
+    *,
+    actor: UserAccount,
+    site_key_value: str,
+    registration_id: uuid.UUID,
+    storage: StorageProvider,
+) -> tuple[str, str, bytes]:
+    """The identity document a walk-up person uploaded, for the officer to compare with the person.
+
+    Only a gate operator for that site's registration can read it, only while the QR is
+    still usable, and every viewing is written to the audit trail.
+    """
+
+    site = site_for_key(database, site_key_value)
+    registration = database.scalar(
+        select(WalkUpRegistration).where(
+            WalkUpRegistration.id == registration_id, WalkUpRegistration.site_id == site.id
+        )
+    )
+    if registration is None or _pass_expired(registration) or registration.id_storage_reference is None:
+        raise WorkflowError(404, "No identity document is available for this registration.")
+    try:
+        content = storage.get(registration.id_storage_reference)
+    except (OSError, ValueError, KeyError) as error:
+        raise WorkflowError(404, "The identity document could not be read.") from error
+    append_audit_event(
+        database,
+        actor=actor,
+        action="walk_up.id_viewed",
+        entity_type="walk_up_registration",
+        entity_id=str(registration.id),
+        reason="The gate officer opened the identity document the person uploaded.",
+        details={"reference": reference_for(registration.id), "site_id": str(site.id)},
+    )
+    return registration.id_filename or "document", registration.id_media_type or "application/octet-stream", content
 
 
 # PUBLIC_INTERFACE
@@ -793,6 +918,42 @@ def email_hint(email: str) -> str:
     return f"{name[:1]}***@{domain}"
 
 
+_ID_COLUMNS = (
+    "id_filename",
+    "id_media_type",
+    "id_size_bytes",
+    "id_sha256",
+    "id_storage_reference",
+    "id_storage_mode",
+    "id_expiry_date",
+)
+
+
+def _document_columns(pending: WalkUpPending) -> dict[str, Any] | None:
+    """The uploaded document's details held on a pending registration, if any."""
+
+    if pending.id_storage_reference is None:
+        return None
+    return {name: getattr(pending, name) for name in _ID_COLUMNS}
+
+
+def _discard_pending(database: Session, pending: WalkUpPending, storage: StorageProvider | None) -> None:
+    """Drop a registration that was never completed, and its uploaded file if nothing else uses it."""
+
+    reference = pending.id_storage_reference
+    database.delete(pending)
+    database.flush()
+    if reference and storage is not None:
+        from app.services.people import _reference_is_used
+
+        lock_private_reference(database, reference)
+        if not _reference_is_used(database, reference):
+            try:
+                storage.delete(reference)
+            except (OSError, ValueError):
+                pass  # An absent or locked file is not worth failing the request for.
+
+
 # PUBLIC_INTERFACE
 def start_email_check(
     database: Session,
@@ -806,6 +967,8 @@ def start_email_check(
     rules_version_id: uuid.UUID,
     language: str,
     confirmed: bool,
+    id_document: dict[str, Any] | None = None,
+    storage: StorageProvider | None = None,
 ) -> tuple[WalkUpPending, str, Site]:
     """Hold a registration until its email code is entered. Stores no person yet.
 
@@ -819,7 +982,10 @@ def start_email_check(
         confirmed=confirmed,
     )
     now = _now()
-    database.execute(delete(WalkUpPending).where(WalkUpPending.created_at < now - timedelta(hours=1)))
+    for stale in database.scalars(
+        select(WalkUpPending).where(WalkUpPending.created_at < now - timedelta(hours=1))
+    ).all():
+        _discard_pending(database, stale, storage)
     email_key = email.strip().lower()
     recent = database.scalar(
         select(func.count())
@@ -846,6 +1012,7 @@ def start_email_check(
         sends=1,
         last_sent_at=now,
         created_at=now,
+        **(id_document or {}),
     )
     database.add(pending)
     database.flush()
@@ -878,7 +1045,11 @@ def resend_email_code(database: Session, *, pending_id: uuid.UUID) -> tuple[Walk
 
 # PUBLIC_INTERFACE
 def verify_email_code(
-    database: Session, *, pending_id: uuid.UUID, code: str
+    database: Session,
+    *,
+    pending_id: uuid.UUID,
+    code: str,
+    storage: StorageProvider | None = None,
 ) -> tuple[WalkUpRegistration, Site, LifeSavingRulesVersion, LifeSavingRulesAcknowledgement, str]:
     """Check the code and, if it is right, complete the registration.
 
@@ -893,18 +1064,18 @@ def verify_email_code(
     if pending is None:
         raise WorkflowError(404, "This registration has expired. Please register again.")
     if pending.code_expires_at < now:
-        database.delete(pending)
+        _discard_pending(database, pending, storage)
         database.commit()
         raise WorkflowError(410, "That code has expired. Please register again.")
     if pending.attempts >= MAX_CODE_ATTEMPTS:
-        database.delete(pending)
+        _discard_pending(database, pending, storage)
         database.commit()
         raise WorkflowError(429, "Too many wrong codes. Please register again.")
     if not secrets.compare_digest(pending.code_hash, _code_hash(pending.id, code.strip())):
         pending.attempts += 1
         left = MAX_CODE_ATTEMPTS - pending.attempts
         if left <= 0:
-            database.delete(pending)
+            _discard_pending(database, pending, storage)
             message = "Too many wrong codes. Please register again."
             status_code = 429
         else:
@@ -925,8 +1096,9 @@ def verify_email_code(
         language=pending.language,
         confirmed=True,
         email_verified_at=now,
+        id_document=_document_columns(pending),
     )
-    database.delete(pending)
+    database.delete(pending)  # the document now belongs to the registration
     database.flush()
     return result
 

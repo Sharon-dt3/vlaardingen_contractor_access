@@ -22,6 +22,7 @@ from app.models import (
     IdentityVerification,
     Invitation,
     LifeSavingRulesAcknowledgement,
+    WalkUpPending,
     WalkUpRegistration,
     Person,
     PresenceEvent,
@@ -56,7 +57,15 @@ def _private_object_references(
             )
         ).all()
     )
-    references = evidence_references | identity_references
+    walk_up_references = set(
+        database.scalars(
+            select(WalkUpRegistration.id_storage_reference).where(
+                WalkUpRegistration.person_id == person_id,
+                WalkUpRegistration.id_storage_reference.is_not(None),
+            )
+        ).all()
+    )
+    references = evidence_references | identity_references | walk_up_references
     if not references:
         return set(), 0
 
@@ -75,6 +84,21 @@ def _private_object_references(
             select(Invitation.identity_document_storage_reference).where(
                 Invitation.identity_document_storage_reference.in_(references),
                 Invitation.id.not_in(invitation_ids),
+            )
+        ).all()
+    )
+    shared.update(
+        database.scalars(
+            select(WalkUpRegistration.id_storage_reference).where(
+                WalkUpRegistration.id_storage_reference.in_(references),
+                WalkUpRegistration.person_id != person_id,
+            )
+        ).all()
+    )
+    shared.update(
+        database.scalars(
+            select(WalkUpPending.id_storage_reference).where(
+                WalkUpPending.id_storage_reference.in_(references)
             )
         ).all()
     )
@@ -100,6 +124,12 @@ def _reference_is_used(database: Session, reference: str) -> bool:
             ).limit(1),
             select(EvidenceAsset.id).where(
                 EvidenceAsset.storage_reference == reference
+            ).limit(1),
+            select(WalkUpRegistration.id).where(
+                WalkUpRegistration.id_storage_reference == reference
+            ).limit(1),
+            select(WalkUpPending.id).where(
+                WalkUpPending.id_storage_reference == reference
             ).limit(1),
         )
     )

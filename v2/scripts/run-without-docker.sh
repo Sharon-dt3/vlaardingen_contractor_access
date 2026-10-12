@@ -72,7 +72,7 @@ api_env() {
       case "$line" in ""|\#*) continue ;; esac
       key="${line%%=*}"; value="${line#*=}"
       value="${value%\"}"; value="${value#\"}"
-      case "$key" in SMTP_*|S3_*|STORAGE_PROVIDER|WEB_MODE|WALK_UP_EMAIL_CHECK|OCR_PROVIDER|ANTHROPIC_*|BEDROCK_*|WEB_ORIGIN) export "$key=$value" ;; esac
+      case "$key" in SMTP_*|S3_*|STORAGE_PROVIDER|WEB_MODE|WALK_UP_EMAIL_CHECK|WALK_UP_ID_DOCUMENT|OCR_PROVIDER|ANTHROPIC_*|BEDROCK_*|WEB_ORIGIN) export "$key=$value" ;; esac
     done <"$ROOT/.env"
     # Google shows app passwords in groups separated by spaces; the real password has none.
     SMTP_PASSWORD="${SMTP_PASSWORD:-}"; export SMTP_PASSWORD="${SMTP_PASSWORD// /}"

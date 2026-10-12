@@ -25,6 +25,8 @@ type Arrival = {
   admitted_at: string | null;
   exited_at: string | null;
   email_verified: boolean;
+  id_uploaded?: boolean;
+  id_expiry_date?: string | null;
   refusal_count: number;
   last_refused_at: string | null;
 };
@@ -53,6 +55,16 @@ const columns: DataTableColumn<Arrival>[] = [
     )
   },
   { key: "company", header: "Company", cell: (row) => row.company_name },
+  {
+    key: "id",
+    header: "ID document",
+    cell: (row) =>
+      row.id_uploaded ? (
+        <span className="text-sm">Uploaded · expires {row.id_expiry_date ?? "n/a"}</span>
+      ) : (
+        <span className="text-sm text-muted-foreground">None</span>
+      )
+  },
   { key: "population", header: "Type", cell: (row) => enumLabel(row.population) },
   { key: "site", header: "Site", cell: (row) => row.site_name },
   {

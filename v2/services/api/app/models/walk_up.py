@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String
+from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -53,6 +53,14 @@ class WalkUpRegistration(Base):
     pass_valid_from: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # The identity document the person uploaded, held privately, and the expiry date they typed.
+    id_filename: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    id_media_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    id_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    id_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    id_storage_reference: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    id_storage_mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    id_expiry_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     # Set when a gate operator lets the person in, and by whom.
     admitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     admitted_by_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -101,6 +109,14 @@ class WalkUpPending(Base):
     sends: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     last_sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # The identity document uploaded with the form, kept until the code is entered.
+    id_filename: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    id_media_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    id_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    id_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    id_storage_reference: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    id_storage_mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    id_expiry_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
 
 # PUBLIC_INTERFACE

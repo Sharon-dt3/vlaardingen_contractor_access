@@ -120,6 +120,8 @@ class Settings(BaseSettings):
     # "on": walk-up people must enter a code emailed to them before they are registered.
     # "off": no email check (for setups without a mail server).
     walk_up_email_check: str = Field(default="on", validation_alias="WALK_UP_EMAIL_CHECK")
+    # "required": a walk-up person uploads an identity document and its expiry date. "off": they do not.
+    walk_up_id_document: str = Field(default="required", validation_alias="WALK_UP_ID_DOCUMENT")
     smtp_host: str = Field(default="smtp.gmail.com", validation_alias="SMTP_HOST")
     smtp_port: int = Field(default=587, ge=1, le=65535, validation_alias="SMTP_PORT")
     smtp_username: str = Field(default="", validation_alias="SMTP_USERNAME")

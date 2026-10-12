@@ -2,9 +2,9 @@
 
 import { formatInSiteZone } from "@/lib/domain";
 import { type FormEvent, useEffect, useId, useState } from "react";
-import { ApiError, apiRequest } from "@/lib/api-client";
+import { ApiError, apiFormRequest, apiRequest } from "@/lib/api-client";
 
-type SiteResponse = { site_key: string; site_name: string };
+type SiteResponse = { site_key: string; site_name: string; id_document_required?: boolean };
 
 type RulesResponse = {
   id: string;
@@ -57,6 +57,7 @@ const POPULATIONS = [
 ];
 const DEFAULT_POPULATION = "maintenance_contractor";
 
+const ID_MAX_BYTES = 5 * 1024 * 1024;
 const FIELD = "mt-1 block w-full rounded-lg border bg-white px-3 py-2 text-slate-950";
 
 function messageFor(error: unknown): string {
@@ -88,6 +89,10 @@ export function WalkUpRegistration({ siteKey }: { siteKey: string }) {
   const [email, setEmail] = useState("");
   const [population, setPopulation] = useState(DEFAULT_POPULATION);
   const [website, setWebsite] = useState("");
+  const [idFile, setIdFile] = useState<File | null>(null);
+  const [idPreviewUrl, setIdPreviewUrl] = useState<string | null>(null);
+  const [idExpiry, setIdExpiry] = useState("");
+  const [idError, setIdError] = useState("");
   const [checked, setChecked] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -136,28 +141,89 @@ export function WalkUpRegistration({ siteKey }: { siteKey: string }) {
     return () => controller.abort();
   }, [language]);
 
+  // A local preview of the chosen file, so the person can check it is the right, readable document.
+  useEffect(() => {
+    if (!idFile) {
+      setIdPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(idFile);
+    setIdPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [idFile]);
+
+  const idRequired = site?.id_document_required === true;
+  const today = new Date().toISOString().slice(0, 10);
+  const latestExpiry = new Date(Date.now() + 25 * 365 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+
+  function chooseIdFile(file: File | null) {
+    setIdError("");
+    if (file && !/\.(png|jpe?g|pdf)$/i.test(file.name)) {
+      setIdFile(null);
+      setIdError("Choose a photo or scan as a PNG, JPG or PDF file.");
+      return;
+    }
+    if (file && (file.size === 0 || file.size > ID_MAX_BYTES)) {
+      setIdFile(null);
+      setIdError("The file must be smaller than 5 MB.");
+      return;
+    }
+    setIdFile(file);
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!rules || !checked || submitting) return;
     setSubmitting(true);
     setError("");
     try {
-      const result = await apiRequest<Receipt | Pending>("/api/walk-up/registrations", {
-        method: "POST",
-        cache: "no-store",
-        body: {
-          site_key: siteKey,
-          first_name: firstName,
-          last_name: lastName,
-          company_name: company,
-          email,
-          population,
-          rules_version_id: rules.id,
-          language: rules.language,
-          confirmed: true,
-          website
+      let result: Receipt | Pending;
+      if (idRequired) {
+        if (!idFile) {
+          setIdError("Choose a photo or scan of your identity document.");
+          setSubmitting(false);
+          return;
         }
-      });
+        if (!idExpiry || idExpiry < today) {
+          setIdError("Enter the expiry date on your document. It must not be in the past.");
+          setSubmitting(false);
+          return;
+        }
+        const form = new FormData();
+        form.set("site_key", siteKey);
+        form.set("first_name", firstName);
+        form.set("last_name", lastName);
+        form.set("company_name", company);
+        form.set("email", email);
+        form.set("population", population);
+        form.set("rules_version_id", rules.id);
+        form.set("language", rules.language);
+        form.set("confirmed", "true");
+        form.set("website", website);
+        form.set("expiry_date", idExpiry);
+        form.set("file", idFile);
+        result = await apiFormRequest<Receipt | Pending>("/api/walk-up/registrations/with-document", form, {
+          method: "POST",
+          cache: "no-store"
+        });
+      } else {
+        result = await apiRequest<Receipt | Pending>("/api/walk-up/registrations", {
+          method: "POST",
+          cache: "no-store",
+          body: {
+            site_key: siteKey,
+            first_name: firstName,
+            last_name: lastName,
+            company_name: company,
+            email,
+            population,
+            rules_version_id: rules.id,
+            language: rules.language,
+            confirmed: true,
+            website
+          }
+        });
+      }
       if ("pending_id" in result) {
         setPending(result);
         setCode("");
@@ -459,6 +525,66 @@ export function WalkUpRegistration({ siteKey }: { siteKey: string }) {
               ))}
             </select>
           </label>
+          {idRequired ? (
+            <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <p className="text-sm font-semibold text-slate-950">Your identity document</p>
+              <p className="text-xs text-slate-600">
+                Upload a clear photo or scan of your ID card or driving licence, and type the expiry date
+                printed on it. Only the gate officer can open it, to compare it with you.
+              </p>
+              <label className="block text-sm font-semibold text-slate-700">
+                Photo or scan (PNG, JPG or PDF, up to 5 MB)
+                <input
+                  accept=".png,.jpg,.jpeg,.pdf,image/png,image/jpeg,application/pdf"
+                  className="mt-1 block w-full text-sm"
+                  onChange={(event) => chooseIdFile(event.target.files?.[0] ?? null)}
+                  required
+                  type="file"
+                />
+              </label>
+              {idFile && idPreviewUrl ? (
+                <figure className="space-y-2">
+                  {idFile.type === "application/pdf" ? (
+                    <a
+                      className="inline-block text-sm font-semibold text-emerald-800 underline"
+                      href={idPreviewUrl}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      Open {idFile.name} to check it
+                    </a>
+                  ) : (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      alt="Preview of the identity document you chose"
+                      className="max-h-56 w-auto rounded-lg border bg-white"
+                      src={idPreviewUrl}
+                    />
+                  )}
+                  <figcaption className="text-xs text-slate-600">
+                    {idFile.name}. Check that every detail is readable.
+                  </figcaption>
+                </figure>
+              ) : null}
+              <label className="block text-sm font-semibold text-slate-700">
+                Expiry date on the document
+                <input
+                  className={FIELD}
+                  max={latestExpiry}
+                  min={today}
+                  onChange={(event) => setIdExpiry(event.target.value)}
+                  required
+                  type="date"
+                  value={idExpiry}
+                />
+              </label>
+              {idError ? (
+                <p className="text-sm text-red-700" role="alert">
+                  {idError}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
           {/* Real people never see or fill this; automated form fillers often do. */}
           <div aria-hidden="true" className="absolute -left-[9999px] h-0 w-0 overflow-hidden">
             <label>
