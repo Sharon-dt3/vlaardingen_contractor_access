@@ -90,10 +90,7 @@ export default function HomePage() {
               </div>
               <h2 className="mt-3 text-2xl font-semibold">{roleLabel(user.role)}</h2>
               <p className="mt-2 text-sm text-slate-300">
-                Account <span className="font-semibold text-white">{user.handle}</span> ·{" "}
-                {user.permissions.includes("*")
-                  ? "All API permissions"
-                  : `${user.permissions.length} API permissions`}
+                Account <span className="font-semibold text-white">{user.handle}</span>
               </p>
             </div>
           </div>
