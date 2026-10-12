@@ -91,10 +91,10 @@ class GateHarness:
         default_factory=lambda: SimpleNamespace(id=uuid.uuid4())
     )
     requested_site: SimpleNamespace = field(
-        default_factory=lambda: SimpleNamespace(id=uuid.uuid4(), is_active=True)
+        default_factory=lambda: SimpleNamespace(id=uuid.uuid4(), is_active=True, timezone="Europe/Amsterdam")
     )
     visit_site: SimpleNamespace = field(
-        default_factory=lambda: SimpleNamespace(id=uuid.uuid4(), is_active=True)
+        default_factory=lambda: SimpleNamespace(id=uuid.uuid4(), is_active=True, timezone="Europe/Amsterdam")
     )
     person: SimpleNamespace = field(
         default_factory=lambda: SimpleNamespace(
@@ -595,7 +595,7 @@ def test_expired_token_is_the_primary_denial(
 def test_wrong_site_is_the_primary_denial(gate_harness: GateHarness) -> None:
     """VAL-06 C: a valid token cannot grant access at a different active site."""
 
-    gate_harness.requested_site = SimpleNamespace(id=uuid.uuid4(), is_active=True)
+    gate_harness.requested_site = SimpleNamespace(id=uuid.uuid4(), is_active=True, timezone="Europe/Amsterdam")
     assert gate_harness.database is not None
     gate_harness.database.records[gate_harness.requested_site.id] = gate_harness.requested_site
 

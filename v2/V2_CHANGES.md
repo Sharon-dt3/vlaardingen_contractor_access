@@ -299,3 +299,21 @@ Changed: migration `20261012_0021` (`site_access_settings`, `walk_up_registratio
 Changed: `services/batch5.py` (`ended_only` option, default off), `services/walk_up.py` (`mark_planned_presence`,
 `merge_walk_ups_into_dashboard`, `list_on_site`), `routes/batch5.py`, `schemas/batch5.py`, `schemas/walk_up.py`,
 `operational-dashboard.tsx`, `lib/domain.ts`, tests in `tests/api/test_walk_up.py`.
+
+## Same capabilities on both paths
+
+Checked end to end against the running app, with John Doe on the planned path and walk-up people on the unexpected path.
+
+| Capability | Planned (Path A) | Unexpected (Path B) |
+|---|---|---|
+| QR issued | After approval, staff set entry and exit | At registration, entry opens after a delay |
+| Validity settings | Default visit length, longest QR | QR hours, entry delay |
+| Entry tracking | Gate grant records the entry | Let in at the kiosk records the entry |
+| Exit tracking | Record exit on the roster **and at the kiosk** | Record exit on the roster and at the kiosk |
+| QR window and time left at the kiosk | **Shown on the scan view and the decision** | Shown on the result |
+| Dashboard | On site, entered, exited, turned away, overdue, split by path | Same |
+| Overdue flag | Past the visit end or the QR's exit time | Past the QR's exit time |
+| Audit trail | Token issue, gate decision, exit | Registration, kiosk check, let in, refusal, exit |
+
+Added in this pass: the QR's entry and exit time and time left on the planned kiosk (scan view and decision, in the site's
+time zone), a Record exit button on the planned kiosk decision, and a "Turned away or denied" row by path on the dashboard.

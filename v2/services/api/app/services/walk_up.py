@@ -1253,8 +1253,11 @@ def merge_walk_ups_into_dashboard(
                 "entry_count": target["entry_count"],
                 "exit_count": target["exit_count"],
                 "overdue_count": 0,
+                "denial_count": target["denial_count"],
             },
-            "walk_up": {"present_count": 0, "entry_count": 0, "exit_count": 0, "overdue_count": 0},
+            "walk_up": {
+                "present_count": 0, "entry_count": 0, "exit_count": 0, "overdue_count": 0, "denial_count": 0,
+            },
         }
 
     def count(row: dict[str, Any], path: str) -> None:
@@ -1295,8 +1298,8 @@ def merge_walk_ups_into_dashboard(
         ):
             site[site_key_name] += counts[count_key]
             totals[total_key] += counts[count_key]
-            if count_key in ("entries", "exits"):
-                path_key = "entry_count" if count_key == "entries" else "exit_count"
+            if count_key in ("entries", "exits", "denials"):
+                path_key = {"entries": "entry_count", "exits": "exit_count", "denials": "denial_count"}[count_key]
                 site["by_path"]["walk_up"][path_key] += counts[count_key]
                 totals["by_path"]["walk_up"][path_key] += counts[count_key]
     snapshot["current_presence"] = sorted(

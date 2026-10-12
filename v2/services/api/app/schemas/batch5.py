@@ -113,6 +113,7 @@ class DashboardPathCounts(BaseModel):
     entry_count: int = Field(..., ge=0)
     exit_count: int = Field(..., ge=0)
     overdue_count: int = Field(default=0, ge=0, description="Still on site after their exit time.")
+    denial_count: int = Field(default=0, ge=0, description="Turned away or denied in the window.")
 
 
 # PUBLIC_INTERFACE

@@ -57,6 +57,7 @@ function PathBreakdown({ byPath }: { byPath?: DashboardByPath | null }) {
     { label: "On site now", key: "present_count" },
     { label: "Entered", key: "entry_count" },
     { label: "Exited", key: "exit_count" },
+    { label: "Turned away or denied", key: "denial_count" },
     { label: "Overdue (still on site after their exit time)", key: "overdue_count" }
   ];
   return (

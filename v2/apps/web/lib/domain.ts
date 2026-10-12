@@ -351,6 +351,9 @@ export type GatePresentation = {
   site_name: string;
   starts_at: string;
   ends_at: string;
+  qr_valid_from?: string | null;
+  qr_valid_until?: string | null;
+  site_timezone?: string;
   uploads: {
     id: string | null;
     kind: "invitation_id" | "evidence";
@@ -362,6 +365,9 @@ export type GatePresentation = {
 };
 
 export type GateDecisionResponse = {
+  token_valid_from?: string | null;
+  token_valid_until?: string | null;
+  site_timezone?: string;
   gate_event_id: string;
   decision: GateDecision;
   reason_codes: string[];
@@ -417,6 +423,7 @@ export type DashboardPathCounts = {
   entry_count: number;
   exit_count: number;
   overdue_count?: number;
+  denial_count?: number;
 };
 
 export type DashboardByPath = {

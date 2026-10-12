@@ -30,7 +30,7 @@ import type {
   Site,
   Visit
 } from "@/lib/domain";
-import { enumLabel, formatDateTime } from "@/lib/domain";
+import { enumLabel, formatDateTime, formatInSiteZone } from "@/lib/domain";
 import { GateQrScanner } from "./gate-qr-scanner";
 
 type KioskStage = "scan" | "verify" | "decision";
@@ -479,6 +479,12 @@ export function GateOperatorKiosk() {
                   <ContextItem label="Purpose" value={presentation.purpose} />
                   <ContextItem label="Invited site" value={presentation.site_name} />
                   <ContextItem label="Visit window" value={`${formatDateTime(presentation.starts_at)} – ${formatDateTime(presentation.ends_at)}`} />
+                  {presentation.qr_valid_from && presentation.qr_valid_until ? (
+                    <ContextItem
+                      label="QR entry and exit"
+                      value={`${formatInSiteZone(presentation.qr_valid_from, presentation.site_timezone)} to ${formatInSiteZone(presentation.qr_valid_until, presentation.site_timezone)} · ${qrTimeLeft(presentation.qr_valid_from, presentation.qr_valid_until)}`}
+                    />
+                  ) : null}
                 </dl>
                 <p className="mt-3 text-xs text-emerald-900">These details come from the invitation linked to the scanned QR, not the selected name.</p>
               </section>
@@ -570,6 +576,19 @@ export function GateOperatorKiosk() {
   );
 }
 
+// "opens in 25 min", "2 h 15 min left" or "expired", from the QR's own entry and exit time.
+function qrTimeLeft(validFrom: string, validUntil: string): string {
+  const now = Date.now();
+  const describe = (ms: number) => {
+    const minutes = Math.max(1, Math.round(ms / 60000));
+    const hours = Math.floor(minutes / 60);
+    return hours > 0 ? `${hours} h ${minutes % 60} min` : `${minutes} min`;
+  };
+  if (new Date(validUntil).getTime() <= now) return "expired";
+  if (new Date(validFrom).getTime() > now) return `opens in ${describe(new Date(validFrom).getTime() - now)}`;
+  return `${describe(new Date(validUntil).getTime() - now)} left`;
+}
+
 function ContextItem({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border bg-slate-50 p-3">
@@ -577,6 +596,40 @@ function ContextItem({ label, value }: { label: string; value: string }) {
         {label}
       </dt>
       <dd className="mt-1 break-words text-sm font-semibold text-slate-900">{value}</dd>
+    </div>
+  );
+}
+
+// After a grant the officer can record the person leaving, the same as on the roster and for walk-ups.
+function RecordExit({ visitId }: { visitId: string }) {
+  const { hasPermission } = useAuth();
+  const queryClient = useQueryClient();
+  const exit = useMutation({
+    mutationFn: () =>
+      apiRequest("/api/presence/exits", { method: "POST", body: { visit_id: visitId } }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["presence"] }),
+        queryClient.invalidateQueries({ queryKey: ["dashboard"] })
+      ]);
+    }
+  });
+  if (!hasPermission("presence:write")) return null;
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-3">
+      <button
+        className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 disabled:opacity-50"
+        disabled={exit.isPending || exit.isSuccess}
+        onClick={() => exit.mutate()}
+        type="button"
+      >
+        {exit.isSuccess ? "Exit recorded" : exit.isPending ? "Recording" : "Record exit"}
+      </button>
+      {exit.isError ? (
+        <span className="text-sm text-red-700">
+          {exit.error instanceof Error ? exit.error.message : "The exit could not be recorded."}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -695,7 +748,14 @@ function DecisionPanel({
             value={requestedSite?.name ?? decision.requested_site_id}
           />
           <ContextItem label="Gate event" value={decision.gate_event_id.slice(0, 13)} />
+          {decision.token_valid_from && decision.token_valid_until ? (
+            <ContextItem
+              label="QR entry and exit"
+              value={`${formatInSiteZone(decision.token_valid_from, decision.site_timezone)} to ${formatInSiteZone(decision.token_valid_until, decision.site_timezone)} · ${qrTimeLeft(decision.token_valid_from, decision.token_valid_until)}`}
+            />
+          ) : null}
         </div>
+        {granted && decision.visit_id ? <RecordExit visitId={decision.visit_id} /> : null}
 
         <div
           className={`mt-6 rounded-xl border bg-white/70 p-4 ${

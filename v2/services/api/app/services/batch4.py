@@ -283,6 +283,11 @@ def get_gate_presentation(
         database, token_reference=token_reference, requested_site_id=requested_site_id
     )
     company = database.get(Company, person.company_id)
+    token = database.scalar(
+        select(AccessToken).where(
+            AccessToken.reference_hash == hashlib.sha256(token_reference.strip().encode("utf-8")).hexdigest()
+        )
+    )
     uploads: list[dict[str, Any]] = []
     if invitation.identity_document_storage_reference:
         uploads.append({
@@ -306,6 +311,9 @@ def get_gate_presentation(
         "email": person.email, "company_name": company.name if company else invitation.company_name,
         "population": person.population.value, "purpose": visit.purpose,
         "site_name": site.name, "starts_at": visit.starts_at, "ends_at": visit.ends_at,
+        "qr_valid_from": (token.valid_from or visit.starts_at) if token else None,
+        "qr_valid_until": token.expires_at if token else None,
+        "site_timezone": site.timezone,
         "uploads": uploads,
     }
 

@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from app.database.session import get_db
-from app.models import UserAccount
+from app.models import AccessToken, Site, UserAccount, Visit
 from app.providers import StorageProvider, get_storage_provider
 from app.schemas.batch4 import (
     GateDecisionResponse, GateEvaluationCreate, GatePresentationCreate,
@@ -132,6 +132,15 @@ def post_gate_evaluation(
             presentation_reference=payload.presentation_reference,
             comparison_confirmed=payload.comparison_confirmed,
         )
+        token = database.get(AccessToken, result["token_id"]) if result.get("token_id") else None
+        visit_for_window = database.get(Visit, result["visit_id"]) if result.get("visit_id") else None
+        site_for_window = database.get(Site, result["requested_site_id"])
+        if token is not None:
+            result["token_valid_from"] = token.valid_from or (
+                visit_for_window.starts_at if visit_for_window else None
+            )
+            result["token_valid_until"] = token.expires_at
+        result["site_timezone"] = site_for_window.timezone if site_for_window else "UTC"
         database.commit()
         return GateDecisionResponse.model_validate(result)
     except WorkflowError as error:

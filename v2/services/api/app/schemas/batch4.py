@@ -81,6 +81,9 @@ class GatePresentationResponse(BaseModel):
     site_name: str = Field(..., description="Site associated with this visit.")
     starts_at: datetime = Field(..., description="Visit start.")
     ends_at: datetime = Field(..., description="Visit end.")
+    qr_valid_from: datetime | None = Field(default=None, description="When the QR starts working.")
+    qr_valid_until: datetime | None = Field(default=None, description="When the QR stops working (its exit time).")
+    site_timezone: str = Field(default="UTC", description="The site's time zone for showing the window.")
     uploads: list[GateUploadResponse] = Field(..., description="Uploads attached specifically to this invitation.")
 
 
@@ -159,3 +162,6 @@ class GateDecisionResponse(BaseModel):
     person_id: uuid.UUID | None
     requested_site_id: uuid.UUID
     occurred_at: datetime
+    token_valid_from: datetime | None = Field(default=None, description="When the presented QR starts working.")
+    token_valid_until: datetime | None = Field(default=None, description="When the presented QR stops working.")
+    site_timezone: str = Field(default="UTC", description="The site's time zone for showing the window.")
