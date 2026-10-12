@@ -1,3 +1,4 @@
+import { SITE_TIME_ZONE } from "@/lib/time";
 import type { StatusTone } from "@/components/ui/status-badge";
 
 export type Role =
@@ -652,8 +653,10 @@ export function formatInSiteZone(value: string, timeZone: string | undefined): s
 }
 
 export function formatDateTime(value: string): string {
+  // Always the site's clock, so every screen, email and the kiosk agree.
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
-    timeStyle: "short"
+    timeStyle: "short",
+    timeZone: SITE_TIME_ZONE
   }).format(new Date(value));
 }

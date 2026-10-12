@@ -76,7 +76,6 @@ export default function HomePage() {
     <div className="space-y-8">
       <PageHeader
         badge={<StatusBadge tone="success">Signed in</StatusBadge>}
-        description="Your workspace reflects the permissions issued by the Batch 1 API. Direct requests remain protected by server-side authorization."
         eyebrow="Batch 1 · Role-aware workspace"
         title={user ? `Welcome, ${user.display_name}` : "Welcome"}
       />

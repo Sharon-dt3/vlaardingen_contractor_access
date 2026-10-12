@@ -317,3 +317,17 @@ Checked end to end against the running app, with John Doe on the planned path an
 
 Added in this pass: the QR's entry and exit time and time left on the planned kiosk (scan view and decision, in the site's
 time zone), a Record exit button on the planned kiosk decision, and a "Turned away or denied" row by path on the dashboard.
+
+## One clock: the site's time zone (Amsterdam)
+
+Every time in the app is now shown, and typed, on the site's clock (Europe/Amsterdam, Central European time with daylight
+saving). Before, the QR card, emails and kiosk used Amsterdam time while the roster, forms and dashboard used the browser's
+own time, so the same moment read differently on different screens.
+
+- Dates and times across the app, the dashboard "last updated" time and the demo clock use the site clock.
+- The invitation form and the QR entry and exit fields are filled in and read on the site clock. The QR form adds a line with
+  the same window on the viewer's own clock when it differs, for example "On your clock that is 4:30 PM GMT+5:30 to 7:30 PM".
+- A "Times: Amsterdam" label sits in the page header.
+- The zone can be changed with `NEXT_PUBLIC_SITE_TIME_ZONE`. New code: `apps/web/lib/time.ts`.
+- Fixed in the same pass: the QR form kept the previous visit's dates when another visit was chosen.
+- The web build folder is now `apps/web/.next.nosync` (with `.next` linked to it) so iCloud does not sync it.

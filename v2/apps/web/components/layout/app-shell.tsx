@@ -308,6 +308,12 @@ export function AppShell({ children }: AppShellProps) {
               </p>
             </div>
             <div className="ml-auto flex items-center gap-2 sm:gap-4">
+              <span
+                className="hidden rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 md:inline-flex"
+                title="Every time in the app is shown on the site's clock"
+              >
+                Times: Amsterdam
+              </span>
               <StatusBadge className="hidden sm:inline-flex" tone="demo">
                 Demo mode
               </StatusBadge>

@@ -1,5 +1,6 @@
 "use client";
 
+import { isoToSiteInput, siteInputToIso, yourClockHint } from "@/lib/time";
 import {
   useMutation,
   useQuery,
@@ -422,7 +423,7 @@ export function Batch3Workspace() {
           </div>
           <div className="grid gap-6 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
             <BlacklistPanel company={company} person={person} />
-            <AccessTokenPanel visit={selectedVisit} />
+            <AccessTokenPanel key={selectedVisit.id} visit={selectedVisit} />
           </div>
         </>
       )}
@@ -1263,11 +1264,8 @@ function BlacklistPanel({
   );
 }
 
-// A datetime-local input wants "YYYY-MM-DDTHH:mm" in the browser's own zone.
-function toLocalInput(iso: string): string {
-  const date = new Date(iso);
-  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-}
+// A datetime-local input wants "YYYY-MM-DDTHH:mm". It is read on the site's clock (Amsterdam time).
+const toLocalInput = isoToSiteInput;
 
 function AccessTokenPanel({ visit }: { visit: Visit }) {
   const { hasPermission } = useAuth();
@@ -1283,22 +1281,26 @@ function AccessTokenPanel({ visit }: { visit: Visit }) {
   const [entryFrom, setEntryFrom] = useState(() => toLocalInput(visit.starts_at));
   const [exitByChoice, setExitByChoice] = useState<string | null>(null);
   const defaultExit = (() => {
-    const start = entryFrom ? new Date(entryFrom).getTime() : new Date(visit.starts_at).getTime();
+    const start = entryFrom
+      ? new Date(siteInputToIso(entryFrom)).getTime()
+      : new Date(visit.starts_at).getTime();
     const latest = Math.min(new Date(visit.ends_at).getTime(), start + maxQrHours * 3600000);
     return toLocalInput(new Date(latest).toISOString());
   })();
   const exitBy = exitByChoice ?? defaultExit;
   const setExitBy = (value: string) => setExitByChoice(value);
+  const entryMs = entryFrom ? new Date(siteInputToIso(entryFrom)).getTime() : NaN;
+  const exitMs = exitBy ? new Date(siteInputToIso(exitBy)).getTime() : NaN;
   const windowError =
     !entryFrom || !exitBy
       ? "Choose both an entry time and an exit time."
-      : new Date(entryFrom) < new Date(toLocalInput(visit.starts_at))
+      : entryMs < new Date(visit.starts_at).getTime()
         ? "The entry time cannot be before the visit starts."
-        : new Date(exitBy) > new Date(toLocalInput(visit.ends_at))
+        : exitMs > new Date(visit.ends_at).getTime()
           ? "The exit time cannot be after the visit ends."
-          : new Date(entryFrom) >= new Date(exitBy)
+          : entryMs >= exitMs
             ? "The entry time must be before the exit time."
-            : new Date(exitBy).getTime() - new Date(entryFrom).getTime() > maxQrHours * 3600000
+            : exitMs - entryMs > maxQrHours * 3600000
               ? `This site allows an access QR to last at most ${maxQrHours} hours. Choose an earlier exit time.`
               : null;
   const queryClient = useQueryClient();
@@ -1334,8 +1336,8 @@ function AccessTokenPanel({ visit }: { visit: Visit }) {
       apiRequest<TokenIssueResponse>(`/api/visits/${visit.id}/tokens`, {
         method: "POST",
         body: {
-          valid_from: new Date(entryFrom).toISOString(),
-          expires_at: new Date(exitBy).toISOString()
+          valid_from: siteInputToIso(entryFrom),
+          expires_at: siteInputToIso(exitBy)
         }
       }),
     onSuccess: async (response) => {
@@ -1467,6 +1469,12 @@ function AccessTokenPanel({ visit }: { visit: Visit }) {
                 />
               </label>
             </div>
+            <p className="mt-2 text-xs text-slate-700">
+              Enter these on the Amsterdam clock.
+              {entryFrom && exitBy && !windowError && yourClockHint(siteInputToIso(entryFrom))
+                ? ` On your clock that is ${yourClockHint(siteInputToIso(entryFrom))} to ${yourClockHint(siteInputToIso(exitBy))}.`
+                : ""}
+            </p>
             <p className="mt-2 text-xs text-slate-500">
               Starts as the visit window ({formatDateTime(visit.starts_at)} to{" "}
               {formatDateTime(visit.ends_at)}) and can be narrowed, not widened. An administrator limits an access QR to {maxQrHours} hours at this site. The gate refuses

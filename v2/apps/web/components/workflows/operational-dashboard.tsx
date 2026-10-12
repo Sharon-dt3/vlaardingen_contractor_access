@@ -1,5 +1,6 @@
 "use client";
 
+import { SITE_TIME_ZONE } from "@/lib/time";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
@@ -67,16 +68,16 @@ function PathBreakdown({ byPath }: { byPath?: DashboardByPath | null }) {
           Planned and unexpected arrivals
         </h3>
         <p className="mt-1 text-sm text-muted-foreground">
-          Planned arrivals came through an invitation (Path A). Unexpected arrivals registered at
-          the entrance QR (Path B).
+          Planned people were invited and approved in advance. Unexpected people turned up without
+          an invitation and registered themselves at the entrance QR.
         </p>
       </div>
       <table className="w-full text-sm">
         <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
           <tr>
             <th className="px-5 py-3 font-semibold" scope="col"></th>
-            <th className="px-5 py-3 font-semibold" scope="col">Planned (Path A)</th>
-            <th className="px-5 py-3 font-semibold" scope="col">Unexpected (Path B)</th>
+            <th className="px-5 py-3 font-semibold" scope="col">Planned: invited in advance</th>
+            <th className="px-5 py-3 font-semibold" scope="col">Unexpected: walk-up arrivals</th>
             <th className="px-5 py-3 font-semibold" scope="col">Total</th>
           </tr>
         </thead>
@@ -554,7 +555,7 @@ export function OperationalDashboard() {
         <Clock3 aria-hidden="true" className="h-4 w-4" />
         Presence evaluated at effective demo time {formatDateTime(snapshot.as_of)} · simulated activity window begins{" "}
         {formatDateTime(snapshot.activity_window_started_at)} · live: refreshes every 15 seconds, last updated{" "}
-        {dashboardQuery.dataUpdatedAt ? new Date(dashboardQuery.dataUpdatedAt).toLocaleTimeString() : "just now"}
+        {dashboardQuery.dataUpdatedAt ? new Date(dashboardQuery.dataUpdatedAt).toLocaleTimeString(undefined, { timeZone: SITE_TIME_ZONE }) : "just now"}
       </p>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">

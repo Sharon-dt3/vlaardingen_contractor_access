@@ -74,10 +74,14 @@ svg.flow{display:block;width:100%;min-width:1040px;height:auto;font-family:var(-
 <li><span class="sw staff"></span>Renewi staff</li><li><span class="sw person"></span>The person</li><li><span class="sw system"></span>The system</li><li><span class="sw officer"></span>Gate officer</li><li><span class="sw new"></span>New in v2</li>
 </ul>
 <div class="scroll" tabindex="0" aria-label="User flow diagram, scrolls sideways on small screens">
-<svg class="flow" viewBox="0 0 1400 2004" role="img" aria-labelledby="ft fd">
+<svg class="flow" viewBox="0 0 1400 2088" role="img" aria-labelledby="ft fd">
 <title id="ft">How a person gets onto the Vlaardingen site</title>
 <desc id="fd">Two paths lead to one gate kiosk. Path A is a planned arrival: invite, register, confirm the life-saving rules, review, approve, access QR. Path B is an unexpected arrival: scan the entrance sign, register, confirm the rules, check the email, entry QR. The officer reads the code, the server checks the records, and the officer lets the person in or refuses. The person is listed as on site until their exit is recorded.</desc>
 <defs><marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M2 1L8 5L2 9" fill="none" style="stroke:var(--arrow)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+<rect class="lane" x="40" y="14" width="1320" height="60" rx="10"/>
+<text class="lanet" x="60" y="34" dominant-baseline="central">Before anyone arrives · Admin sets how long a QR lasts, per site (Settings page)</text>
+<text class="lanes" x="60" y="56" dominant-baseline="central">Planned: default visit length and longest access QR. Unexpected: QR hours and entry delay. Every change is audited.</text>
+<g transform="translate(0,84)">
 <rect class="card neutral" x="520" y="24" width="360" height="64" rx="10"/>
 <text class="ttl neutral" x="700" y="48" text-anchor="middle" dominant-baseline="central">A person needs to enter the site</text>
 <text class="dsc neutral" x="700" y="70" text-anchor="middle" dominant-baseline="central">Contractor, driver or visitor</text>
@@ -281,6 +285,7 @@ svg.flow{display:block;width:100%;min-width:1040px;height:auto;font-family:var(-
 <text class="dsc system" x="1078" y="1922">refusals. Staff see it on the</text>
 <text class="dsc system" x="1078" y="1942">People and Audit pages.</text>
 <path class="arr" d="M340 1878 L370 1878" fill="none" marker-end="url(#ah)"/>
+</g>
 </svg>
 </div>
 <p class="hint">On a narrow screen, scroll the diagram sideways.</p>
@@ -289,6 +294,8 @@ svg.flow{display:block;width:100%;min-width:1040px;height:auto;font-family:var(-
 <div><h2>Access QR and entry QR</h2><p>The access QR comes from an invitation (Path A). The entry QR comes from walk-up registration (Path B). Each is read in its own kiosk panel. The entry QR is also emailed after the code check.</p></div>
 <div><h2>Entrance sign</h2><p>One shared QR at the site entrance. It identifies the site and never a person.</p></div>
 <div><h2>Refusals</h2><p>Every refusal is stored in the audit trail with who, when and why, whether the system refused or the officer did. A refusal is a record and does not lock the person out.</p></div>
+<div><h2>Validity settings</h2><p>An administrator sets, per site, how long a QR lasts: the default visit length and the longest access QR for planned arrivals, and the QR hours and entry delay for unexpected arrivals. Nothing is fixed in the code, and QR codes already issued keep the times they were given.</p></div>
+<div><h2>Overdue</h2><p>A person still on site after they should have left: past the visit end or their QR exit time. They stay on the live dashboard, flagged, for both paths.</p></div>
 <div><h2>Reference</h2><p>An 8-character code that stands in for the entry QR when the phone cannot be scanned.</p></div>
 </div>
 <p class="note">This describes the working demo. The rules wording is sample text. Renewi still has to supply the approved wording, decide who may use Path B, and decide how long records are kept.</p>

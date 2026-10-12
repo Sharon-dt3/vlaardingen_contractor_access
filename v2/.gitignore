@@ -62,3 +62,7 @@ playwright-report/
 
 # Test run output (the browser and end-to-end tests write here)
 artifacts/
+
+# Build output kept out of iCloud sync
+.next.nosync/
+**/.next.nosync/

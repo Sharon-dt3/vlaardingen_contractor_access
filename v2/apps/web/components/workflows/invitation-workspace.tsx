@@ -1,5 +1,6 @@
 "use client";
 
+import { isoToSiteInput, siteInputToIso } from "@/lib/time";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   useMutation,
@@ -72,7 +73,7 @@ const invitationSchema = z
     starts_at: z.string().min(1, "Select a start time."),
     ends_at: z.string().min(1, "Select an end time.")
   })
-  .refine((value) => new Date(value.ends_at) > new Date(value.starts_at), {
+  .refine((value) => new Date(siteInputToIso(value.ends_at)) > new Date(siteInputToIso(value.starts_at)), {
     message: "The end must be later than the start.",
     path: ["ends_at"]
   });
@@ -98,12 +99,11 @@ function defaultDateTime(
   hoursFromNow: number,
   rounding: "up" | "down" = "up"
 ): string {
-  const date = new Date(new Date(effectiveAt).getTime() + hoursFromNow * 60 * 60 * 1000);
-  const round = rounding === "down" ? Math.floor : Math.ceil;
-  date.setMinutes(round(date.getMinutes() / 15) * 15, 0, 0);
-  return new Date(date.getTime() - date.getTimezoneOffset() * 60000)
-    .toISOString()
-    .slice(0, 16);
+  const step = 15 * 60 * 1000;
+  const target = new Date(effectiveAt).getTime() + hoursFromNow * 60 * 60 * 1000;
+  const rounded = (rounding === "down" ? Math.floor : Math.ceil)(target / step) * step;
+  // The form is filled in on the site's clock (Amsterdam time).
+  return isoToSiteInput(new Date(rounded).toISOString());
 }
 
 function mutationMessage(error: unknown): string | null {
@@ -379,15 +379,15 @@ function InvitationCreatePanel({
     mutationFn: async (values: InvitationForm) => {
       // Re-read before submission: the saved clock may have advanced since this form loaded.
       const clock = await apiRequest<DemoClock>("/api/demo-clock");
-      if (new Date(values.ends_at).getTime() <= new Date(clock.effective_at).getTime()) {
+      if (new Date(siteInputToIso(values.ends_at)).getTime() <= new Date(clock.effective_at).getTime()) {
         throw new Error("Visit end must be after the API effective demo time. Choose a later window.");
       }
       return apiRequest<Invitation>("/api/invitations", {
         method: "POST",
         body: {
           ...values,
-          starts_at: new Date(values.starts_at).toISOString(),
-          ends_at: new Date(values.ends_at).toISOString()
+          starts_at: siteInputToIso(values.starts_at),
+          ends_at: siteInputToIso(values.ends_at)
         }
       });
     },
