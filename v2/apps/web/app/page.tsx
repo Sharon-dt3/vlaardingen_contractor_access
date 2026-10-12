@@ -96,7 +96,6 @@ export default function HomePage() {
                   : `${user.permissions.length} API permissions`}
               </p>
             </div>
-            <StatusBadge tone="demo">Local demo session</StatusBadge>
           </div>
         </section>
       ) : null}
