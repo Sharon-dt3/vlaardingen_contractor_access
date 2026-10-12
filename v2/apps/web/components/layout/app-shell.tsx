@@ -13,6 +13,7 @@ import {
   ScanLine,
   Settings,
   ShieldCheck,
+  UserCog,
   UsersRound,
   X
 } from "lucide-react";
@@ -56,6 +57,7 @@ const navigation: NavigationItem[] = [
     permission: "gate:evaluate"
   },
   { label: "Audit trail", href: "/audit", icon: FileClock, permission: "audit:read" },
+  { label: "Users", href: "/users", icon: UserCog, permission: "*" },
   { label: "Settings", href: "/settings", icon: Settings, permission: "*" }
 ];
 
@@ -181,7 +183,8 @@ export function AppShell({ children }: AppShellProps) {
   const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
   const mobileNavigationCloseRef = useRef<HTMLButtonElement>(null);
   const isLoginRoute = pathname === "/login";
-  const isInviteeRoute = pathname === "/register" || pathname.startsWith("/arrive/");
+  const isInviteeRoute =
+    pathname === "/register" || pathname === "/set-password" || pathname.startsWith("/arrive/");
 
   useEffect(() => {
     document.body.style.overflow = mobileOpen ? "hidden" : "";

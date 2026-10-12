@@ -39,6 +39,7 @@ from app.models.life_saving import (
     LifeSavingRulesAcknowledgement,
     LifeSavingRulesVersion,
 )
+from app.models.accounts import AccountToken
 from app.models.walk_up import SiteAccessSettings, WalkUpPending, WalkUpRegistration
 from app.models.batch6 import (
     DemoClock,
@@ -76,6 +77,7 @@ __all__ = [
     "IdentityVerification",
     "Invitation",
     "LifeSavingRulesAcknowledgement",
+    "AccountToken",
     "SiteAccessSettings",
     "WalkUpPending",
     "WalkUpRegistration",

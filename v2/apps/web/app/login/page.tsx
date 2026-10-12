@@ -11,8 +11,8 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { ApiError } from "@/lib/api-client";
 
 const loginSchema = z.object({
-  handle: z.string().min(3, "Choose a seeded demo account."),
-  password: z.string().min(1, "Enter the local demo password.")
+  handle: z.string().min(3, "Enter your email address."),
+  password: z.string().min(1, "Enter your password.")
 });
 
 type LoginValues = z.infer<typeof loginSchema>;
@@ -97,8 +97,8 @@ export default function LoginPage() {
             Sign in to continue
           </h2>
           <p className="mt-3 text-sm leading-6 text-muted-foreground">
-            Use the admin demo account below. The local-only password is prefilled for
-            this credential-free manager demonstration.
+            Sign in with your work email and password. In this demonstration the
+            administrator account below is filled in for you.
           </p>
 
           <div className="mt-6 grid gap-2 sm:grid-cols-2">
@@ -134,7 +134,7 @@ export default function LoginPage() {
           >
             <div>
               <label className="text-sm font-semibold text-slate-800" htmlFor="handle">
-                Demo account
+                Email
               </label>
               <input
                 aria-describedby={form.formState.errors.handle ? "handle-error" : undefined}
@@ -152,7 +152,7 @@ export default function LoginPage() {
             </div>
             <div>
               <label className="text-sm font-semibold text-slate-800" htmlFor="password">
-                Local demo password
+                Password
               </label>
               <input
                 aria-describedby={form.formState.errors.password ? "password-error" : undefined}

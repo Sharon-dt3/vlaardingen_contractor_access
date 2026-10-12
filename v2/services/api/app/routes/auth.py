@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -12,6 +12,9 @@ from app.config import get_settings
 from app.database.session import get_db
 from app.models import UserAccount
 from app.schemas.auth import LoginRequest, SessionResponse, UserResponse
+from app.rate_limit import RateLimiter
+from app.services.accounts import check_sign_in
+from app.services.audit import append_audit_event
 from app.security import (
     create_session_token,
     get_current_user,
@@ -20,6 +23,7 @@ from app.security import (
 )
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+_login_limiter = RateLimiter(limit=40, window_seconds=600)
 
 
 def _user_response(account: UserAccount) -> UserResponse:
@@ -49,37 +53,52 @@ def _user_response(account: UserAccount) -> UserResponse:
 )
 def login(
     credentials: LoginRequest,
+    request: Request,
     response: Response,
     database: Annotated[Session, Depends(get_db)],
 ) -> SessionResponse:
-    """Authenticate a seeded handle and return its role and permissions.
+    """Authenticate by email (or the demo handle) and return the role and permissions.
 
-    Args:
-        credentials: Local demo handle and configured seed password.
-        response: FastAPI response used to set the signed session cookie.
-        database: Request-scoped SQLAlchemy session.
-
-    Returns:
-        The authenticated user and session lifetime.
-
-    Raises:
-        HTTPException: When credentials are invalid or the account is inactive.
+    Five wrong passwords lock the account for fifteen minutes. The reply never says whether
+    the account exists, is locked or is deactivated, so it cannot be used to find staff emails.
+    Every success, failure and lockout is written to the audit trail.
     """
 
-    account = database.scalar(
-        select(UserAccount).where(
-            UserAccount.handle == credentials.handle.strip().lower()
+    if not _login_limiter.allow(request.client.host if request.client else "unknown"):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many sign-in attempts from this connection. Try again in a few minutes.",
         )
+    handle = credentials.handle.strip().lower()
+    account, outcome = check_sign_in(
+        database, handle=handle, password=credentials.password, verify=verify_password
     )
-    if (
-        account is None
-        or not account.is_active
-        or not verify_password(credentials.password, account.password_hash)
-    ):
+    if account is None:
+        known = database.scalar(select(UserAccount).where(UserAccount.handle == handle))
+        append_audit_event(
+            database,
+            actor=None,
+            action="auth.locked" if outcome == "locked_now" else "auth.login_failed",
+            entity_type="user_account",
+            entity_id=str(known.id) if known else "unknown",
+            reason="A sign-in was refused." if outcome != "locked_now" else "The account was locked after repeated wrong passwords.",
+            details={"handle": handle[:64], "reason": outcome},
+        )
+        database.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid handle or password.",
+            detail="Invalid email or password, or the account is temporarily locked. Try again later.",
         )
+    append_audit_event(
+        database,
+        actor=account,
+        action="auth.login",
+        entity_type="user_account",
+        entity_id=str(account.id),
+        reason="The person signed in.",
+        details={"handle": account.handle},
+    )
+    database.commit()
 
     settings = get_settings()
     response.set_cookie(

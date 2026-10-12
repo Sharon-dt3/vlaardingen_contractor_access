@@ -350,3 +350,24 @@ and the expiry date printed on it, next to name, company, email and category.
 - New endpoints: `POST /api/walk-up/registrations/with-document` (public), `POST /api/walk-up/gate/id-document` (gate staff).
   The older JSON registration route refuses while the document is required.
 - Migration `20261013_0022`. Tests: 201 pass in `tests/api`.
+
+## Staff accounts: add people by invitation, set a password, sign in
+
+Administrators now add the people who can sign in, from a new **Users** screen (Administrators only).
+
+- **Add a person:** name, work email, role (Administrator or Gate operator). The system creates an inactive account and emails a
+  one-time link, valid for 48 hours, where the person chooses their own password. Only a hash of the link is stored. The
+  administrator never sees the link or the password.
+- **Set a password** (`/set-password`): shows who the link is for, checks the password as the person types (at least 12 characters,
+  letters mixed with numbers or symbols, not containing the email name). A weak password does not use up the link. The link is
+  removed from the address bar and sent in the body, never in a URL.
+- **Sign in with email:** five wrong passwords lock the account for 15 minutes. The reply is the same whether the email does
+  not exist, the password is wrong, the account is locked, invited or deactivated, so it cannot be used to find staff emails.
+  Sign-ins, failures and lockouts go to the audit trail. A per-address limit also applies.
+- **Users screen actions:** Resend invitation (the earlier link stops working), Deactivate (sessions end at once, the account stays so
+  the audit trail keeps the name) and Reactivate. You cannot deactivate yourself or the last active administrator.
+- Audit events: `user.invited`, `user.invitation_resent`, `user.activated`, `user.deactivated`, `user.reactivated`, `auth.login`,
+  `auth.login_failed`, `auth.locked`.
+- Migration `20261013_0023`: email, last sign-in, failed attempts, lock time and creator on `user_accounts`, and an `account_tokens` table.
+- Not built yet: forgot and reset password, change password, the authenticator code for administrators, idle sign-out, the gate
+  operator's narrower menu, changing a role, and the first-admin setup command. The shared `admin.demo` account still exists.
