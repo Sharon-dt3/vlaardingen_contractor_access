@@ -522,7 +522,6 @@ export function OperationalDashboard() {
     <section aria-labelledby="operational-dashboard" className="space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <p className="eyebrow">Batch 5 · Operational overview</p>
           <h2 className="mt-2 text-2xl font-bold tracking-tight text-slate-950" id="operational-dashboard">
             Site access dashboard
           </h2>
